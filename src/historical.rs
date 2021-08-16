@@ -46,13 +46,14 @@
 //! participant timestamps may have broader resolution such as milliseconds 
 //! or seconds.
 
-use std::{pin::Pin, task::Poll};
+use std::{collections::HashMap, pin::Pin, task::Poll};
 
 use chrono::{DateTime, Utc};
 use futures::{Future, FutureExt, Stream};
+use itertools::Itertools;
 use reqwest::RequestBuilder;
 
-use crate::{data::{AuthData, BarData, MultiBars, MultiQuotes, MultiTrades, QuoteData, SingleQuote, SingleTrade, TimeFrame, TradeData}, errors::Error};
+use crate::{data::{AuthData, BarData, MultiBars, MultiQuotes, MultiTrades, QuoteData, SingleQuote, SingleSnapshot, SingleTrade, SnapshotData, TimeFrame, TradeData}, errors::Error};
 
 /// Base URL to access historical data
 pub const BASE_URL: &str = "https://data.alpaca.markets/v2";
@@ -192,6 +193,38 @@ impl Client {
                 .query(&query)
                 .send().await?
                 .json::<MultiBars>().await?;
+        Ok(rsp)
+    }
+    /// The Snapshot API for one ticker provides the latest trade, latest quote, 
+    /// minute bar daily bar and previous daily bar data for a given ticker symbol.
+    pub async fn snapshot(&self, symbol: &str) -> Result<SingleSnapshot, Error> {
+        let url = format!("https://data.alpaca.markets/v2/stocks/{symbol}/snapshot", symbol=symbol);
+        let rsp = self.get_authenticated(&url)
+            .send().await?
+            .json::<SingleSnapshot>().await?;
+        Ok(rsp)
+    }
+    /// The Snapshot API for multiple tickers provides the latest trade, 
+    /// latest quote, minute bar daily bar and previous daily bar data for 
+    /// the given ticker symbols.
+    pub async fn snapshots_multi(&self, symbols: &str) -> Result<HashMap<String, SnapshotData>, Error> {
+        let url = "https://data.alpaca.markets/v2/stocks/snapshots";
+        let rsp = self.get_authenticated(&url)
+            .query(&[("symbols", symbols)])
+            .send().await?
+            .json::<HashMap<String, SnapshotData>>().await?;
+        Ok(rsp)
+    }
+    /// The Snapshot API for multiple tickers provides the latest trade, 
+    /// latest quote, minute bar daily bar and previous daily bar data for 
+    /// the given ticker symbols.
+    pub async fn snapshots_multi_vec(&self, symbols: &[&str]) -> Result<HashMap<String, SnapshotData>, Error> {
+        let url = "https://data.alpaca.markets/v2/stocks/snapshots";
+        let symbols = symbols.iter().join(",");
+        let rsp = self.get_authenticated(&url)
+            .query(&[("symbols", symbols)])
+            .send().await?
+            .json::<HashMap<String, SnapshotData>>().await?;
         Ok(rsp)
     }
 }
@@ -401,22 +434,82 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_req() -> Result<(), anyhow::Error> {
+    async fn test_quotes_stream() -> Result<(), anyhow::Error> {
         let client   = Client::new(AuthData { 
             key: dotenv!("APCA_KEY_ID").to_string(), 
             secret: dotenv!("APCA_SECRET").to_string() 
         });
 
-        //println!("TRADE {:?}", client.latest_trade("AAPL").await?);
-        //println!("QUOTE {:?}", client.latest_quote("AAPL").await?);
-        println!("BAR   {:?}", client.bars_paged(
+        let mut stream = client.quotes(
             "AAPL", 
-            Utc.ymd(2021, 08, 01).and_hms(0, 0, 0),
-            Utc.ymd(2021, 08, 09).and_hms(0, 0, 0),
-            crate::data::TimeFrame::Day,
-            Some(100),
+            Utc.ymd(2021, 08, 02).and_hms(16, 0, 0),
+            Utc.ymd(2021, 08, 02).and_hms(16, 3, 0),
             None
-        ).await?);
+        );
+
+        while let Some(x) = stream.next().await {
+            println!("{:?}", x.timestamp);
+        }
+
+        Ok(())
+    }
+
+
+    #[tokio::test]
+    async fn test_trades_stream() -> Result<(), anyhow::Error> {
+        let client   = Client::new(AuthData { 
+            key: dotenv!("APCA_KEY_ID").to_string(), 
+            secret: dotenv!("APCA_SECRET").to_string() 
+        });
+
+        let mut stream = client.trades(
+            "AAPL", 
+            Utc.ymd(2021, 08, 01).and_hms(16, 0, 0),
+            Utc.ymd(2021, 08, 01).and_hms(16, 5, 0),
+            None
+        );
+
+        while let Some(x) = stream.next().await {
+            println!("{:?}", x.timestamp);
+        }
+
+        Ok(())
+    }
+    
+    #[tokio::test]
+    async fn test_snapshot() -> Result<(), anyhow::Error> {
+        let client   = Client::new(AuthData { 
+            key: dotenv!("APCA_KEY_ID").to_string(), 
+            secret: dotenv!("APCA_SECRET").to_string() 
+        });
+
+        let data = client.snapshot("AAPL").await?;
+        println!("{:?}", data);
+
+        Ok(())
+    }
+    #[tokio::test]
+    async fn test_snapshots_multi() -> Result<(), anyhow::Error> {
+        let client   = Client::new(AuthData { 
+            key: dotenv!("APCA_KEY_ID").to_string(), 
+            secret: dotenv!("APCA_SECRET").to_string() 
+        });
+
+        let data = client.snapshots_multi("AAPL,MSFT,TSM").await?;
+        println!("{:?}", data);
+
+        Ok(())
+    }
+    #[tokio::test]
+    async fn test_snapshots_multi_vec() -> Result<(), anyhow::Error> {
+        let client   = Client::new(AuthData { 
+            key: dotenv!("APCA_KEY_ID").to_string(), 
+            secret: dotenv!("APCA_SECRET").to_string() 
+        });
+
+        let data = client.snapshots_multi_vec(&["AAPL","MSFT","TSM"]).await?;
+        println!("{:?}", data);
+
         Ok(())
     }
 

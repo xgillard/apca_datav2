@@ -10,8 +10,8 @@ use serde::{Serialize, Deserialize};
 
 use crate::errors::RealtimeErrorCode;
 
-/*******************************************************************************
- * CLIENT TO SERVER ************************************************************
+/******************************************************************************
+ * CLIENT TO SERVER ***********************************************************
  ******************************************************************************/
  
 /// The data source for the real time data
@@ -84,8 +84,8 @@ pub struct SubscriptionData {
 }
 
 
-/*******************************************************************************
- * SERVER TO CLIENT ************************************************************
+/******************************************************************************
+ * SERVER TO CLIENT ***********************************************************
  ******************************************************************************/
 /// Every message you receive from the server will be in the format:
 ///
@@ -201,8 +201,8 @@ pub enum Response {
     Bar(DataPoint<BarData>),
 }
 
-/*******************************************************************************
- * DATA POINTS *****************************************************************
+/******************************************************************************
+ * DATA POINTS ****************************************************************
  ******************************************************************************/
 
 /// A generic datapoint that holds information related to a given symbol
@@ -388,68 +388,8 @@ pub struct DataPoint<T> {
     CboeBzx,
  }
 
- #[cfg(test)]
- mod tests {
-    use crate::data::Response;
-
-     #[test]
-    fn test_deserialize_trade() {
-        let txt = r#"{
-            "T": "t",
-            "i": 96921,
-            "S": "AAPL",
-            "x": "D",
-            "p": 126.55,
-            "s": 1,
-            "t": "2021-02-22T15:51:44.208Z",
-            "c": [
-              "@",
-              "I"
-            ],
-            "z": "C"
-          }"#;
-        let deserialized = serde_json::from_str::<Response>(txt);
-        assert!(deserialized.is_ok());
-    }
-    #[test]
-    fn test_deserialize_quote() {
-        let txt = r#"{
-            "T": "q",
-            "S": "AMD",
-            "bx": "U",
-            "bp": 87.66,
-            "bs": 1,
-            "ax": "Q",
-            "ap": 87.68,
-            "as": 4,
-            "t": "2021-02-22T15:51:45.335689322Z",
-            "c": [
-              "R"
-            ],
-            "z": "C"
-          }"#;
-          let deserialized = serde_json::from_str::<Response>(txt);
-          assert!(deserialized.is_ok());
-    }
-    #[test]
-    fn test_deserialize_bar() {
-        let txt = r#"{
-            "T": "b",
-            "S": "SPY",
-            "o": 388.985,
-            "h": 389.13,
-            "l": 388.975,
-            "c": 389.12,
-            "v": 49378,
-            "t": "2021-02-22T19:15:00Z"
-          }"#;
-          let deserialized = serde_json::from_str::<Response>(txt);
-          assert!(deserialized.is_ok());
-    }
- }
-
-/*******************************************************************************
- * HISTORY DATA POINTS *********************************************************
+/******************************************************************************
+ * HISTORY DATA POINTS ********************************************************
  ******************************************************************************/
 
  /// Timeframe for the aggregation. Available values are: 1Min, 1Hour, 1Day.
@@ -538,4 +478,100 @@ where D: serde::Deserializer<'de>,
         .map(|x: Option<_>| {
             x.unwrap_or_default()
         })
+}
+
+/******************************************************************************
+ * SNAPSHOTS ******************************************************************
+ ******************************************************************************/
+
+/// The Snapshot API for one ticker provides the latest trade, latest quote, 
+/// minute bar daily bar and previous daily bar data for a given ticker symbol.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotData {
+    /// Latest trade object.
+    #[serde(rename = "latestTrade")]
+    latest_trade: TradeData,
+    /// Latest quote object
+    #[serde(rename = "latestQuote")]
+    latest_quote: QuoteData,
+    /// Minute bar object.
+    #[serde(rename = "minuteBar")]
+    minute_bar: BarData,
+    /// Daily bar object.
+    #[serde(rename = "dailyBar")]
+    daily_bar: BarData,
+    /// Previous daily close bar object
+    #[serde(rename = "prevDailyBar")]
+    prev_daily_bar: BarData,
+}
+
+/// The Snapshot API for one ticker provides the latest trade, latest quote, 
+/// minute bar daily bar and previous daily bar data for a given ticker symbol.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SingleSnapshot {
+    /// The symbol
+    symbol: String, 
+    /// The actual payload
+    #[serde(flatten)]
+    data: SnapshotData,
+}
+
+#[cfg(test)]
+mod tests {
+   use crate::data::Response;
+
+    #[test]
+   fn test_deserialize_trade() {
+       let txt = r#"{
+           "T": "t",
+           "i": 96921,
+           "S": "AAPL",
+           "x": "D",
+           "p": 126.55,
+           "s": 1,
+           "t": "2021-02-22T15:51:44.208Z",
+           "c": [
+             "@",
+             "I"
+           ],
+           "z": "C"
+         }"#;
+       let deserialized = serde_json::from_str::<Response>(txt);
+       assert!(deserialized.is_ok());
+   }
+   #[test]
+   fn test_deserialize_quote() {
+       let txt = r#"{
+           "T": "q",
+           "S": "AMD",
+           "bx": "U",
+           "bp": 87.66,
+           "bs": 1,
+           "ax": "Q",
+           "ap": 87.68,
+           "as": 4,
+           "t": "2021-02-22T15:51:45.335689322Z",
+           "c": [
+             "R"
+           ],
+           "z": "C"
+         }"#;
+         let deserialized = serde_json::from_str::<Response>(txt);
+         assert!(deserialized.is_ok());
+   }
+   #[test]
+   fn test_deserialize_bar() {
+       let txt = r#"{
+           "T": "b",
+           "S": "SPY",
+           "o": 388.985,
+           "h": 389.13,
+           "l": 388.975,
+           "c": 389.12,
+           "v": 49378,
+           "t": "2021-02-22T19:15:00Z"
+         }"#;
+         let deserialized = serde_json::from_str::<Response>(txt);
+         assert!(deserialized.is_ok());
+   }
 }

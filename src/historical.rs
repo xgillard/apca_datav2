@@ -202,24 +202,35 @@ impl Client {
  
 // TODO: If anybody ever reviews this portion of code; is there any better/more
 //       idomatic way to accomplish this ?
-pub trait Paged {
-    type Item;
 
+/// This trait denotes a page (aka a chunk) from a paginated list of item.
+/// Basically, it gives a convenient way to transparently access the paged 
+/// data along with the next page token which needs to be sent to server in 
+/// order to fetch the next chunk.
+trait Paged {
+    type Item;
+    /// Splits the page in a data set and an optional next page token
     fn split(self) -> (Vec<Self::Item>, Option<String>);
 }
-
-pub trait FetchNextPage<'a, T: Paged> {
+/// This trait basically denotes a factory that creates a future used to fetch
+/// the next chunk of data from the server
+trait FetchNextPage<'a, T: Paged> {
     fn fetch(self: Pin<&Self>, token: Option<String>) -> Pin<Box< dyn Future<Output=Result<T, Error>> + 'a >>;
 }
 
-pub struct PagedStream<'a, T, F> 
+/// A future bound to some given lifetime, returning an Ok(T) or an Error
+type FailibleFuture<'a, T> = dyn Future<Output=Result<T, Error>> + 'a;
+
+/// A paged stream is a stream that buffers a chunk of data and transparently 
+/// fetches the next page whenever whenever needed.
+struct PagedStream<'a, T, F> 
 where T: Paged, 
       T::Item: Unpin,
       F: FetchNextPage<'a, T> + Unpin
 {
     source: Pin<Box<F>>,
     data  : Vec<T::Item>,
-    fut   : Option<Pin<Box<dyn Future<Output=Result<T, Error>> + 'a >>>
+    fut   : Option<Pin<Box< FailibleFuture<'a, T> >>>
 }
 
 impl <'a, T, F> PagedStream<'a, T, F> 
@@ -227,6 +238,8 @@ where T: Paged,
       T::Item: Unpin,
       F: FetchNextPage<'a, T> + Unpin
 {
+    /// Creates a new paged stream from a given source. The first future is
+    /// created by passing a None token.
     pub fn new(source: F) -> Self {
         let source = Box::pin(source);
         let fut    = source.as_ref().fetch(None);
@@ -249,31 +262,31 @@ where T: Paged,
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<Self::Item>> {
         let data = self.data.pop();
         if data.is_some() {
-            return Poll::Ready(data);
-        } else {
-            if let Some(fut) = self.fut.as_mut() {
-                return match fut.poll_unpin(cx) {
-                    std::task::Poll::Pending => std::task::Poll::Pending,
-                    std::task::Poll::Ready(data) => {
-                        let (data, token) = data.unwrap().split();
-                        
-                        if token.is_some() {
-                            self.fut = Some(self.source.as_ref().fetch(token));
-                        } else {
-                            self.fut = None;
-                        }
-                        self.data = data;
-                        self.data.reverse();
-
-                        std::task::Poll::Ready(self.data.pop())
+            Poll::Ready(data)
+        } else if let Some(fut) = self.fut.as_mut() {
+            match fut.poll_unpin(cx) {
+                std::task::Poll::Pending => std::task::Poll::Pending,
+                std::task::Poll::Ready(data) => {
+                    let (data, token) = data.unwrap().split();
+                    
+                    if token.is_some() {
+                        self.fut = Some(self.source.as_ref().fetch(token));
+                    } else {
+                        self.fut = None;
                     }
-                };
-            } else {
-                return Poll::Ready(None);
+                    self.data = data;
+                    self.data.reverse();
+
+                    std::task::Poll::Ready(self.data.pop())
+                }
             }
+        } else {
+            Poll::Ready(None)
         }
     }
 }
+/*----------------------------------------------------------------------------*/
+/* THE MULTI-* DATA POINTS ARE STRUCTURES THAT EMBODY THE PAGING MECHANISM    */
 /*----------------------------------------------------------------------------*/
 impl Paged for MultiTrades {
     type Item = TradeData;
@@ -293,6 +306,9 @@ impl Paged for MultiBars {
         (self.bars, self.token)
     }
 }
+
+/// This structure encapsulates a call to `trades_paged` and yields a future
+/// that can be used to asychronously fetch the next trades page
 struct FetchNextTrades<'a> {
     client: &'a Client,
     // params
@@ -309,6 +325,9 @@ impl <'a> FetchNextPage<'a, MultiTrades> for FetchNextTrades<'a> {
         )
     }
 }
+
+/// This structure encapsulates a call to `quotes_paged` and yields a future
+/// that can be used to asychronously fetch the next quotes page
 struct FetchNextQuotes<'a> {
     client: &'a Client,
     // params
@@ -325,6 +344,9 @@ impl <'a> FetchNextPage<'a, MultiQuotes> for FetchNextQuotes<'a> {
         )
     }
 }
+
+/// This structure encapsulates a call to `bars_paged` and yields a future
+/// that can be used to asychronously fetch the next bars page
 struct FetchNextBars<'a> {
     client: &'a Client,
     // params

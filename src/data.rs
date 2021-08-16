@@ -536,6 +536,6 @@ where D: serde::Deserializer<'de>,
 {
     Deserialize::deserialize(d)
         .map(|x: Option<_>| {
-            x.unwrap_or(vec![])
+            x.unwrap_or_default()
         })
 }

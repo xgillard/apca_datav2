@@ -16,10 +16,7 @@ async fn main() -> Result<()> {
     //
     client.subscribe(
         SubscriptionDataBuilder::default()
-            .trades(vec!["AAPL".to_string(), 
-                       "MSFT".to_string(), 
-                       "TSM" .to_string(), 
-                       "QCOM".to_string()])
+            .quotes(vec!["AAPL".to_string()])
             .build()?
     ).await?;
     

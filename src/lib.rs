@@ -13,4 +13,5 @@
 
 pub mod errors;
 pub mod data;
+pub mod historical;
 pub mod realtime;

@@ -2,10 +2,13 @@
 //! Alpaca's data API v2.
 
 extern crate serde;
+use std::fmt::Display;
+
 use derive_builder::Builder;
 use chrono::{DateTime, Utc};
 use serde::{Serialize, Deserialize};
-use serde_repr::{Serialize_repr, Deserialize_repr};
+
+use crate::errors::RealtimeErrorCode;
 
 /*******************************************************************************
  * CLIENT TO SERVER ************************************************************
@@ -54,8 +57,8 @@ pub enum Action {
 /// ```{"action":"auth","key":"PK************","secret":"************"}```
 #[derive(Debug, Clone, Serialize, Builder)]
 pub struct AuthData {
-    key:    String,
-    secret: String,
+    pub key:    String,
+    pub secret: String,
 }
 
 /// You can subscribe to trades, quotes and bars of a particular symbol 
@@ -73,87 +76,17 @@ pub struct AuthData {
 #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct SubscriptionData {
     #[builder(setter(strip_option), default)]
-    trades: Option<Vec<String>>,
+    pub trades: Option<Vec<String>>,
     #[builder(setter(strip_option), default)]
-    quotes: Option<Vec<String>>,
+    pub quotes: Option<Vec<String>>,
     #[builder(setter(strip_option), default)]
-    bars  : Option<Vec<String>>,
+    pub bars  : Option<Vec<String>>,
 }
 
 
 /*******************************************************************************
  * SERVER TO CLIENT ************************************************************
  ******************************************************************************/
-
-/// Encapsulates the protocol errors
-#[derive(Debug, thiserror::Error, Clone, Serialize, Deserialize)]
-#[error("{message}")]
-pub struct AlpacaError {
-    /// Code identifying the problem
-    #[serde(rename="code")]
-    pub code: AlpacaErrorCode,
-    /// Human readable explanation of the failure
-    #[serde(rename="msg")]
-    message: String,
-}
-/// Encapsulates the protocol errors codes
-#[derive(Debug, Clone, Copy, Serialize_repr, Deserialize_repr)]
-#[repr(u16)]
-pub enum AlpacaErrorCode {
-    /// The message you sent to the server did not follow the specification
-    /// ```[{"T":"error","code":400,"msg":"invalid syntax"}]```
-    #[serde(rename="400")]
-    InvalidSyntax = 400,
-    /// You have attempted to subscribe or unsubscribe before authentication
-    /// ```[{"T":"error","code":401,"msg":"not authenticated"}]```
-    #[serde(rename="401")]
-    NotAuthenticated = 401,
-    /// You have provided invalid authentication credentials.
-    /// ```[{"T":"error","code":402,"msg":"auth failed"}]```
-    #[serde(rename="402")]
-    AuthFailed = 402,
-    /// You have already successfully authenticated during your current session.
-    /// ```[{"T":"error","code":403,"msg":"already authenticated"}]```
-    #[serde(rename="403")]
-    AlreadyAuthenticated = 403,
-    /// You failed to successfully authenticate after connecting. 
-    /// You have a few seconds to authenticate after connecting.
-    /// ```[{"T":"error","code":404,"msg":"auth timeout"}]```
-    #[serde(rename="404")]
-    AuthTimeout  = 404,
-    /// The symbol subscription request you sent would put you over the limit 
-    /// set by your subscription package. If this happens your symbol 
-    /// subscriptions are the same as they were before you sent the request 
-    /// that failed.
-    /// ```[{"T":"error","code":405,"msg":"symbol limit exceeded"}]```
-    #[serde(rename="405")]
-    SymbolLimitExceeded = 405,
-    /// You already have an ongoing authenticated session.
-    /// ```[{"T":"error","code":406,"msg":"connection limit exceeded"}]```
-    #[serde(rename="406")]
-    ConnectionLimitExceeded = 406,
-    /// You may receive this if you are too slow to process the messages sent 
-    /// by the server. Please note that this is not guaranteed to arrive 
-    /// before you are disconnected to avoid keeping slow connections active 
-    /// forever
-    /// ```[{"T":"error","code":407,"msg":"slow client"}]```
-    #[serde(rename="407")]
-    SlowClient = 407,
-    /// Your account does not have access to Data v2.
-    /// ```[{"T":"error","code":408,"msg":"v2 not enabled"}]```
-    #[serde(rename="408")]
-    DataV2NotEnabled = 408,
-    /// You have attempted to access a data source not available in your 
-    /// subscription package.
-    /// ```[{"T":"error","code":409,"msg":"insufficient subscription"}]```
-    #[serde(rename="409")]
-    InsufficientSubscription = 409,
-    /// An unexpected error occurred on our end and we are investigating the issue.
-    /// ```[{"T":"error","code":500,"msg":"internal error"}```
-    #[serde(rename="500")]
-    InternalError = 500,
-}
-
 /// Every message you receive from the server will be in the format:
 ///
 /// ```json
@@ -226,7 +159,7 @@ pub enum Response {
     /// * An unexpected error occurred on our end and we are investigating the issue.
     ///   ```[{"T":"error","code":500,"msg":"internal error"}```
     #[serde(rename="error")]
-    Error(AlpacaError),
+    Error(RealtimeErrorCode),
     /// This variant denotes a **control message** meant to inform you of the
     /// successful completion of the action you requested. For instance, 
     /// upon successfully connecting, you will receive the  welcome message: 
@@ -514,3 +447,95 @@ pub struct DataPoint<T> {
           assert!(deserialized.is_ok());
     }
  }
+
+/*******************************************************************************
+ * HISTORY DATA POINTS *********************************************************
+ ******************************************************************************/
+
+ /// Timeframe for the aggregation. Available values are: 1Min, 1Hour, 1Day.
+ #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize)]
+ pub enum TimeFrame {
+    #[serde(rename="1Min")]
+    Minute, 
+    #[serde(rename="1Hour")]
+    Hour,
+    #[serde(rename="1Day")]
+    Day
+ }
+ impl Display for TimeFrame {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Minute => write!(f, "1Min"),
+            Self::Hour   => write!(f, "1Hour"),
+            Self::Day    => write!(f, "1Day"),
+        }
+    }
+}
+
+/// A datapoint that holds one single quote
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SingleQuote {
+    /// The symbol
+    pub symbol: String,
+    /// The actual payload
+    pub quote  : QuoteData,
+}
+/// A datapoint that holds one single quote
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultiQuotes {
+    /// The actual payload
+    #[serde(deserialize_with="null_as_emptyvec")]
+    pub quotes : Vec<QuoteData>,
+    /// The symbol
+    pub symbol: String,
+    #[serde(rename="next_page_token")]
+    pub token : Option<String>,
+}
+/// A datapoint that holds one single trade
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SingleTrade {
+    /// The symbol
+    pub symbol: String,
+    /// The actual payload
+    pub trade  : TradeData,
+}
+/// A datapoint that holds one single trade
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultiTrades {
+    /// The actual payload
+    #[serde(deserialize_with="null_as_emptyvec")]
+    pub trades : Vec<TradeData>,
+    /// The symbol
+    pub symbol: String,
+    #[serde(rename="next_page_token")]
+    pub token : Option<String>,
+}
+/// A datapoint that holds one single bar
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SingleBar {
+    /// The actual payload
+    pub bar  : BarData,
+    /// The symbol
+    pub symbol: String,
+}
+/// A datapoint that holds one single trade
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultiBars {
+    /// The actual payload
+    #[serde(deserialize_with="null_as_emptyvec")]
+    pub bars  : Vec<BarData>,
+    /// The symbol
+    pub symbol: String,
+    #[serde(rename="next_page_token")]
+    pub token : Option<String>,
+}
+
+fn null_as_emptyvec<'de, T, D>(d: D) -> Result<Vec<T>, D::Error>
+where D: serde::Deserializer<'de>,
+      T: serde::Deserialize<'de>
+{
+    Deserialize::deserialize(d)
+        .map(|x: Option<_>| {
+            x.unwrap_or(vec![])
+        })
+}

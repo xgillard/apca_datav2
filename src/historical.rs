@@ -90,46 +90,34 @@ impl Client {
 
     /// This stream returns the desired trades history going through the several 
     /// "pages" of the history asynchoronously; upon request.
-    pub fn trades<'a>(&'a self, symbol: &'a str, start: DateTime<Utc>, end: DateTime<Utc>, limit: Option<usize>) -> TradesHistoryStream<'a> {
-        TradesHistoryStream {
+    pub fn trades<'a>(&'a self, symbol: &'a str, start: DateTime<Utc>, end: DateTime<Utc>, limit: Option<usize>) -> impl Stream<Item=TradeData> + 'a {
+        PagedStream::new(FetchNextTrades {
             client: self,
             symbol,
-            start, end, 
-            limit,
-            data: vec![],
-            fut: Some(Box::pin(
-                self.trades_paged(symbol, start, end, limit, None)
-            ))
-        }
+            start, end,
+            limit
+        })
     }
     /// This stream returns the desired quotes history going through the several 
     /// "pages" of the history asynchoronously; upon request.
-    pub fn quotes<'a>(&'a self, symbol: &'a str, start: DateTime<Utc>, end: DateTime<Utc>, limit: Option<usize>) -> QuotesHistoryStream<'a> {
-        QuotesHistoryStream {
+    pub fn quotes<'a>(&'a self, symbol: &'a str, start: DateTime<Utc>, end: DateTime<Utc>, limit: Option<usize>) -> impl Stream<Item=QuoteData> + 'a {
+        PagedStream::new(FetchNextQuotes {
             client: self,
             symbol,
-            start, end, 
-            limit,
-            data: vec![],
-            fut: Some(Box::pin(
-                self.quotes_paged(symbol, start, end, limit, None)
-            ))
-        }
+            start, end,
+            limit
+        })
     }
     /// This stream returns the desired trades history going through the several 
     /// "pages" of the history asynchoronously; upon request.
-    pub fn bars<'a>(&'a self, symbol: &'a str, start: DateTime<Utc>, end: DateTime<Utc>, timeframe: TimeFrame ,limit: Option<usize>) -> BarsHistoryStream<'a> {
-        BarsHistoryStream {
+    pub fn bars<'a>(&'a self, symbol: &'a str, start: DateTime<Utc>, end: DateTime<Utc>, timeframe: TimeFrame ,limit: Option<usize>) -> impl Stream<Item=BarData> + 'a {
+        PagedStream::new(FetchNextBars {
             client: self,
             symbol,
-            start, end, 
-            timeframe, 
-            limit,
-            data: vec![],
-            fut: Some(Box::pin(
-                self.bars_paged(symbol, start, end, timeframe, limit, None)
-            ))
-        }
+            start, end,
+            timeframe,
+            limit
+        })
     }
 
     /// This endpoint returns trade historical data for the requested security
@@ -214,112 +202,130 @@ impl Client {
  
 // TODO: If anybody ever reviews this portion of code; is there any better/more
 //       idomatic way to accomplish this ?
+pub trait Paged {
+    type Item;
 
-/// This stream returns the desired trades history going through the several 
-/// "pages" of the history asynchoronously; upon request.
-pub struct TradesHistoryStream<'a> {
-    client: &'a Client,
-    // params
-    symbol: &'a str, 
-    start: DateTime<Utc>, 
-    end: DateTime<Utc>, 
-    limit: Option<usize>, 
-
-    data: Vec<TradeData>,
-    fut : Option<Pin<Box<dyn Future<Output=Result<MultiTrades, Error>> + 'a >>>,
+    fn split(self) -> (Vec<Self::Item>, Option<String>);
 }
 
-impl <'a> Stream for TradesHistoryStream<'a> {
+pub trait FetchNextPage<'a, T: Paged> {
+    fn fetch(self: Pin<&Self>, token: Option<String>) -> Pin<Box< dyn Future<Output=Result<T, Error>> + 'a >>;
+}
+
+pub struct PagedStream<'a, T, F> 
+where T: Paged, 
+      T::Item: Unpin,
+      F: FetchNextPage<'a, T> + Unpin
+{
+    source: Pin<Box<F>>,
+    data  : Vec<T::Item>,
+    fut   : Option<Pin<Box<dyn Future<Output=Result<T, Error>> + 'a >>>
+}
+
+impl <'a, T, F> PagedStream<'a, T, F> 
+where T: Paged, 
+      T::Item: Unpin,
+      F: FetchNextPage<'a, T> + Unpin
+{
+    pub fn new(source: F) -> Self {
+        let source = Box::pin(source);
+        let fut    = source.as_ref().fetch(None);
+
+        Self {
+            source,
+            data: vec![],
+            fut : Some(fut),
+        }
+    }
+}
+
+impl <'a, T, F> Stream for PagedStream<'a, T, F> 
+where T: Paged, 
+      T::Item: Unpin,
+      F: FetchNextPage<'a, T> + Unpin
+{
+    type Item = T::Item;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<Self::Item>> {
+        let data = self.data.pop();
+        if data.is_some() {
+            return Poll::Ready(data);
+        } else {
+            if let Some(fut) = self.fut.as_mut() {
+                return match fut.poll_unpin(cx) {
+                    std::task::Poll::Pending => std::task::Poll::Pending,
+                    std::task::Poll::Ready(data) => {
+                        let (data, token) = data.unwrap().split();
+                        
+                        if token.is_some() {
+                            self.fut = Some(self.source.as_ref().fetch(token));
+                        } else {
+                            self.fut = None;
+                        }
+                        self.data = data;
+                        self.data.reverse();
+
+                        std::task::Poll::Ready(self.data.pop())
+                    }
+                };
+            } else {
+                return Poll::Ready(None);
+            }
+        }
+    }
+}
+/*----------------------------------------------------------------------------*/
+impl Paged for MultiTrades {
     type Item = TradeData;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<Self::Item>> {
-        let data = self.data.pop();
-        if data.is_some() {
-            return Poll::Ready(data);
-        } else {
-            if let Some(fut) = self.fut.as_mut() {
-                return match fut.poll_unpin(cx) {
-                    std::task::Poll::Pending => std::task::Poll::Pending,
-                    std::task::Poll::Ready(data) => {
-                        let multi = data.unwrap();
-                        
-                        if multi.token.is_some() {
-                            self.fut = Some(Box::pin(self.client.trades_paged(
-                            self.symbol, 
-                            self.start, 
-                            self.end, 
-                            self.limit, 
-                            multi.token)));
-                        } else {
-                            self.fut = None;
-                        }
-                        self.data = multi.trades;
-                        self.data.reverse();
-
-                        std::task::Poll::Ready(self.data.pop())
-                    }
-                };
-            } else {
-                return Poll::Ready(None);
-            }
-        }
+    fn split(self) -> (Vec<Self::Item>, Option<String>) {
+        (self.trades, self.token)
     }
 }
-
-/// This stream returns the desired quotes history going through the several 
-/// "pages" of the history asynchoronously; upon request.
-pub struct QuotesHistoryStream<'a> {
+impl Paged for MultiQuotes {
+    type Item = QuoteData;
+    fn split(self) -> (Vec<Self::Item>, Option<String>) {
+        (self.quotes, self.token)
+    }
+}
+impl Paged for MultiBars {
+    type Item = BarData;
+    fn split(self) -> (Vec<Self::Item>, Option<String>) {
+        (self.bars, self.token)
+    }
+}
+struct FetchNextTrades<'a> {
     client: &'a Client,
     // params
     symbol: &'a str, 
     start: DateTime<Utc>, 
     end: DateTime<Utc>, 
     limit: Option<usize>, 
-
-    data: Vec<QuoteData>,
-    fut : Option<Pin<Box<dyn Future<Output=Result<MultiQuotes, Error>> + 'a >>>,
 }
-
-impl <'a> Stream for QuotesHistoryStream<'a> {
-    type Item = QuoteData;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<Self::Item>> {
-        let data = self.data.pop();
-        if data.is_some() {
-            return Poll::Ready(data);
-        } else {
-            if let Some(fut) = self.fut.as_mut() {
-                return match fut.poll_unpin(cx) {
-                    std::task::Poll::Pending => std::task::Poll::Pending,
-                    std::task::Poll::Ready(data) => {
-                        let multi = data.unwrap();
-                        
-                        if multi.token.is_some() {
-                            self.fut = Some(Box::pin(self.client.quotes_paged(
-                            self.symbol, 
-                            self.start, 
-                            self.end, 
-                            self.limit, 
-                            multi.token)));
-                        } else {
-                            self.fut = None;
-                        }
-                        self.data = multi.quotes;
-                        self.data.reverse();
-
-                        std::task::Poll::Ready(self.data.pop())
-                    }
-                };
-            } else {
-                return Poll::Ready(None);
-            }
-        }
+impl <'a> FetchNextPage<'a, MultiTrades> for FetchNextTrades<'a> {
+    fn fetch(self: Pin<&Self>, token: Option<String>) -> Pin<Box<dyn Future<Output=Result<MultiTrades, Error>> + 'a >> {
+        Box::pin(
+            self.client.trades_paged(
+                self.symbol, self.start, self.end, self.limit, token)
+        )
     }
 }
-
-/// This stream returns the desired bars history going through the several 
-/// "pages" of the history asynchoronously; upon request.
-pub struct BarsHistoryStream<'a> {
+struct FetchNextQuotes<'a> {
+    client: &'a Client,
+    // params
+    symbol: &'a str, 
+    start: DateTime<Utc>, 
+    end: DateTime<Utc>, 
+    limit: Option<usize>, 
+}
+impl <'a> FetchNextPage<'a, MultiQuotes> for FetchNextQuotes<'a> {
+    fn fetch(self: Pin<&Self>, token: Option<String>) -> Pin<Box<dyn Future<Output=Result<MultiQuotes, Error>> + 'a >> {
+        Box::pin(
+            self.client.quotes_paged(
+                self.symbol, self.start, self.end, self.limit, token)
+        )
+    }
+}
+struct FetchNextBars<'a> {
     client: &'a Client,
     // params
     symbol: &'a str, 
@@ -327,50 +333,15 @@ pub struct BarsHistoryStream<'a> {
     end: DateTime<Utc>, 
     timeframe: TimeFrame ,
     limit: Option<usize>, 
-
-    data: Vec<BarData>,
-    fut : Option<Pin<Box<dyn Future<Output=Result<MultiBars, Error>> + 'a >>>,
 }
-
-impl <'a> Stream for BarsHistoryStream<'a> {
-    type Item = BarData;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<Self::Item>> {
-        let data = self.data.pop();
-        if data.is_some() {
-            return Poll::Ready(data);
-        } else {
-            if let Some(fut) = self.fut.as_mut() {
-                return match fut.poll_unpin(cx) {
-                    std::task::Poll::Pending => std::task::Poll::Pending,
-                    std::task::Poll::Ready(data) => {
-                        let multibars = data.unwrap();
-                        
-                        if multibars.token.is_some() {
-                            self.fut = Some(Box::pin(self.client.bars_paged(
-                            self.symbol, 
-                            self.start, 
-                            self.end, 
-                            self.timeframe, 
-                            self.limit, 
-                            multibars.token)));
-                        } else {
-                            self.fut = None;
-                        }
-                        self.data = multibars.bars;
-                        self.data.reverse();
-
-                        std::task::Poll::Ready(self.data.pop())
-                    }
-                };
-            } else {
-                return Poll::Ready(None);
-            }
-        }
+impl <'a> FetchNextPage<'a, MultiBars> for FetchNextBars<'a> {
+    fn fetch(self: Pin<&Self>, token: Option<String>) -> Pin<Box<dyn Future<Output=Result<MultiBars, Error>> + 'a >> {
+        Box::pin(
+            self.client.bars_paged(
+                self.symbol, self.start, self.end, self.timeframe, self.limit, token)
+        )
     }
 }
-
-
 /******************************************************************************
  ******************************************************************************
  ******************************************************************************/

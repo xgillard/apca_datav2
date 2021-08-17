@@ -53,7 +53,7 @@ use futures::{Future, FutureExt, Stream};
 use itertools::Itertools;
 use reqwest::RequestBuilder;
 
-use crate::{data::{AuthData, BarData, MultiBars, MultiQuotes, MultiTrades, QuoteData, SingleQuote, SingleSnapshot, SingleTrade, SnapshotData, TimeFrame, TradeData}, errors::Error};
+use crate::{data::{AuthData, BarData, MultiBars, MultiQuotes, MultiTrades, QuoteData, SingleQuote, SingleSnapshot, SingleTrade, SnapshotData, TimeFrame, TradeData}, errors::{Error, maybe_convert_to_hist_error}};
 
 /// Base URL to access historical data
 pub const BASE_URL: &str = "https://data.alpaca.markets/v2";
@@ -134,9 +134,10 @@ impl Client {
         if let Some(token) = page_token {
             query.push(("page_token", token));
         }
-        let rsp   = self.get_authenticated(&url)
+        let rsp = self.get_authenticated(&url)
                 .query(&query)
-                .send().await?
+                .send().await
+                .map_err(|e| maybe_convert_to_hist_error(e))?
                 .json::<MultiTrades>().await?;
         Ok(rsp)
     }
@@ -144,7 +145,8 @@ impl Client {
     pub async fn latest_trade(&self, symbol: &str) -> Result<SingleTrade, Error> {
         let url = format!("https://data.alpaca.markets/v2/stocks/{symbol}/trades/latest", symbol=symbol);
         let rsp = self.get_authenticated(&url)
-                .send().await?
+                .send().await
+                .map_err(|e| maybe_convert_to_hist_error(e))?
                 .json::<SingleTrade>().await?;
         Ok(rsp)
     }
@@ -163,7 +165,8 @@ impl Client {
         }
         let rsp   = self.get_authenticated(&url)
                 .query(&query)
-                .send().await?
+                .send().await
+                .map_err(|e| maybe_convert_to_hist_error(e))?
                 .json::<MultiQuotes>().await?;
         Ok(rsp)
     }
@@ -171,7 +174,8 @@ impl Client {
     pub async fn latest_quote(&self, symbol: &str) -> Result<SingleQuote, Error> {
         let url = format!("https://data.alpaca.markets/v2/stocks/{symbol}/quotes/latest", symbol=symbol);
         let rsp = self.get_authenticated(&url)
-                .send().await?
+                .send().await
+                .map_err(|e| maybe_convert_to_hist_error(e))?
                 .json::<SingleQuote>().await?;
         Ok(rsp)
     }
@@ -191,7 +195,8 @@ impl Client {
         }
         let rsp   = self.get_authenticated(&url)
                 .query(&query)
-                .send().await?
+                .send().await
+                .map_err(|e| maybe_convert_to_hist_error(e))?
                 .json::<MultiBars>().await?;
         Ok(rsp)
     }
@@ -200,7 +205,8 @@ impl Client {
     pub async fn snapshot(&self, symbol: &str) -> Result<SingleSnapshot, Error> {
         let url = format!("https://data.alpaca.markets/v2/stocks/{symbol}/snapshot", symbol=symbol);
         let rsp = self.get_authenticated(&url)
-            .send().await?
+            .send().await
+            .map_err(|e| maybe_convert_to_hist_error(e))?
             .json::<SingleSnapshot>().await?;
         Ok(rsp)
     }
@@ -211,7 +217,8 @@ impl Client {
         let url = "https://data.alpaca.markets/v2/stocks/snapshots";
         let rsp = self.get_authenticated(&url)
             .query(&[("symbols", symbols)])
-            .send().await?
+            .send().await
+            .map_err(|e| maybe_convert_to_hist_error(e))?
             .json::<HashMap<String, SnapshotData>>().await?;
         Ok(rsp)
     }
@@ -223,7 +230,8 @@ impl Client {
         let symbols = symbols.iter().join(",");
         let rsp = self.get_authenticated(&url)
             .query(&[("symbols", symbols)])
-            .send().await?
+            .send().await
+            .map_err(|e| maybe_convert_to_hist_error(e))?
             .json::<HashMap<String, SnapshotData>>().await?;
         Ok(rsp)
     }

@@ -1,6 +1,5 @@
 //! This module provides a namespace to declare the errors that can occur 
 //! in this crate.
-
 use tokio_tungstenite::tungstenite as tungstenite;
 use serde::{Serialize, Deserialize};
 use serde_repr::{Serialize_repr, Deserialize_repr};
@@ -17,6 +16,8 @@ pub enum Error {
     Websocket(#[from] tungstenite::Error),
     #[error("error with Alpaca's realtime API {0}")]
     Realtime(#[from] RealtimeError),
+    #[error("error with Alpaca's history API {0}")]
+    History(#[from] HistoryError),
     #[error("error in the conversion from/to JSON")]
     Json(#[from] serde_json::Error),
     #[error("BUG: {0}")]
@@ -104,3 +105,48 @@ pub enum RealtimeErrorCode {
 /*******************************************************************************
  * HISTORICAL API SPECIFIC STUFFS
  ******************************************************************************/
+
+/// Basically, Alpaca has reused the standard meaning of HTTP statuses but
+/// this error type adds some 'business' information on top of it
+ #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize_repr, Deserialize_repr, thiserror::Error)]
+ #[repr(u16)]
+pub enum HistoryError {
+    /// Invalid value for query parameter
+    #[error("invalid value for query parameter")]
+    #[serde(rename="400")]
+    BadRequest = 400,
+    /// Unauthorized
+    #[error("unauthorized")]
+    #[serde(rename="403")]
+    Forbidden = 403,
+    /// Not Found
+    #[error("not found")]
+    #[serde(rename="404")]
+    NotFound = 404,
+    /// Invalid query parameter
+    #[error("invalid query parameter")]
+    #[serde(rename="422")]
+    Unprocessable = 422,
+    /// Rate limit exceeded
+    #[error("rate limit exceeded")]
+    #[serde(rename="429")]
+    TooManyRequests = 429,
+}
+
+/// Attempts to convert an HTTP error into an history error. 
+/// Basically, Alpaca has reused the standard meaning of HTTP statuses but
+/// this error type adds some 'business' information on top of it
+pub(crate) fn maybe_convert_to_hist_error(e: reqwest::Error) -> Error {
+    if let Some(status) = e.status() {
+        match status.as_u16() {
+            400 => Error::History(HistoryError::BadRequest),
+            403 => Error::History(HistoryError::Forbidden),
+            404 => Error::History(HistoryError::NotFound),
+            422 => Error::History(HistoryError::Unprocessable),
+            429 => Error::History(HistoryError::TooManyRequests),
+            _   => Error::HttpError(e)
+        }
+    } else {
+        Error::HttpError(e)
+    }
+}

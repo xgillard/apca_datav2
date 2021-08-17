@@ -7,7 +7,7 @@ Alpaca. The original doc is to be found here:
 https://alpaca.markets/docs/api-documentation/api-v2/market-data/alpaca-data-api-v2/
 
 ## Example Usage
-```
+```rust
 let apca = Apca::new(
     dotenv!("APCA_KEY_ID").to_string(), 
     dotenv!("APCA_SECRET").to_string());
@@ -51,4 +51,5 @@ to exploit the 2nd version of Alpaca's API. (v1 is decommissioned on august 26,
 ## Note
 As far as I am concerned, this project is mostly thought of as a big fat pull
 request to be applied on top of https://github.com/d-e-s-o/apca. But the truth
-is, I feel a bit lazy about making a smooth integration for it in `apca`.
+is, I feel a bit lazy about making a smooth integration for it in `apca` right
+now (might do it later though).

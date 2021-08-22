@@ -1,0 +1,6 @@
+edition = "2018"
+tab_spaces = 2
+blank_lines_lower_bound = 0          # nightly only
+blank_lines_upper_bound = 2          # nightly only
+match_block_trailing_comma = true    # nightly only
+trailing_semicolon = false           # nightly only

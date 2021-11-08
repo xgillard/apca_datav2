@@ -137,7 +137,7 @@ impl Client {
         let rsp = self.get_authenticated(&url)
                 .query(&query)
                 .send().await
-                .map_err(|e| maybe_convert_to_hist_error(e))?
+                .map_err(maybe_convert_to_hist_error)?
                 .json::<MultiTrades>().await?;
         Ok(rsp)
     }
@@ -146,7 +146,7 @@ impl Client {
         let url = format!("https://data.alpaca.markets/v2/stocks/{symbol}/trades/latest", symbol=symbol);
         let rsp = self.get_authenticated(&url)
                 .send().await
-                .map_err(|e| maybe_convert_to_hist_error(e))?
+                .map_err(maybe_convert_to_hist_error)?
                 .json::<SingleTrade>().await?;
         Ok(rsp)
     }
@@ -166,7 +166,7 @@ impl Client {
         let rsp   = self.get_authenticated(&url)
                 .query(&query)
                 .send().await
-                .map_err(|e| maybe_convert_to_hist_error(e))?
+                .map_err(maybe_convert_to_hist_error)?
                 .json::<MultiQuotes>().await?;
         Ok(rsp)
     }
@@ -175,7 +175,7 @@ impl Client {
         let url = format!("https://data.alpaca.markets/v2/stocks/{symbol}/quotes/latest", symbol=symbol);
         let rsp = self.get_authenticated(&url)
                 .send().await
-                .map_err(|e| maybe_convert_to_hist_error(e))?
+                .map_err(maybe_convert_to_hist_error)?
                 .json::<SingleQuote>().await?;
         Ok(rsp)
     }
@@ -196,7 +196,7 @@ impl Client {
         let rsp   = self.get_authenticated(&url)
                 .query(&query)
                 .send().await
-                .map_err(|e| maybe_convert_to_hist_error(e))?
+                .map_err(maybe_convert_to_hist_error)?
                 .json::<MultiBars>().await?;
         Ok(rsp)
     }
@@ -206,7 +206,7 @@ impl Client {
         let url = format!("https://data.alpaca.markets/v2/stocks/{symbol}/snapshot", symbol=symbol);
         let rsp = self.get_authenticated(&url)
             .send().await
-            .map_err(|e| maybe_convert_to_hist_error(e))?
+            .map_err(maybe_convert_to_hist_error)?
             .json::<SingleSnapshot>().await?;
         Ok(rsp)
     }
@@ -215,10 +215,10 @@ impl Client {
     /// the given ticker symbols.
     pub async fn snapshots_multi(&self, symbols: &str) -> Result<HashMap<String, SnapshotData>, Error> {
         let url = "https://data.alpaca.markets/v2/stocks/snapshots";
-        let rsp = self.get_authenticated(&url)
+        let rsp = self.get_authenticated(url)
             .query(&[("symbols", symbols)])
             .send().await
-            .map_err(|e| maybe_convert_to_hist_error(e))?
+            .map_err(maybe_convert_to_hist_error)?
             .json::<HashMap<String, SnapshotData>>().await?;
         Ok(rsp)
     }
@@ -228,10 +228,10 @@ impl Client {
     pub async fn snapshots_multi_vec(&self, symbols: &[&str]) -> Result<HashMap<String, SnapshotData>, Error> {
         let url = "https://data.alpaca.markets/v2/stocks/snapshots";
         let symbols = symbols.iter().join(",");
-        let rsp = self.get_authenticated(&url)
+        let rsp = self.get_authenticated(url)
             .query(&[("symbols", symbols)])
             .send().await
-            .map_err(|e| maybe_convert_to_hist_error(e))?
+            .map_err(maybe_convert_to_hist_error)?
             .json::<HashMap<String, SnapshotData>>().await?;
         Ok(rsp)
     }
@@ -428,8 +428,8 @@ mod test {
 
         let mut stream = client.bars(
             "AAPL", 
-            Utc.ymd(2021, 08, 01).and_hms(0, 0, 0),
-            Utc.ymd(2021, 08, 15).and_hms(0, 0, 0),
+            Utc.ymd(2021,  8,  1).and_hms(0, 0, 0),
+            Utc.ymd(2021,  8, 15).and_hms(0, 0, 0),
             crate::data::TimeFrame::Day,
             Some(3)
         );
@@ -450,8 +450,8 @@ mod test {
 
         let mut stream = client.quotes(
             "AAPL", 
-            Utc.ymd(2021, 08, 02).and_hms(16, 0, 0),
-            Utc.ymd(2021, 08, 02).and_hms(16, 3, 0),
+            Utc.ymd(2021,  8,  2).and_hms(16, 0, 0),
+            Utc.ymd(2021,  8,  2).and_hms(16, 3, 0),
             None
         );
 
@@ -472,8 +472,8 @@ mod test {
 
         let mut stream = client.trades(
             "AAPL", 
-            Utc.ymd(2021, 08, 01).and_hms(16, 0, 0),
-            Utc.ymd(2021, 08, 01).and_hms(16, 5, 0),
+            Utc.ymd(2021,  8,  1).and_hms(16, 0, 0),
+            Utc.ymd(2021,  8,  1).and_hms(16, 5, 0),
             None
         );
 

@@ -3,9 +3,17 @@ use apca_datav2::data::{AuthDataBuilder, Response, Source, SubscriptionDataBuild
 use dotenv_codegen::dotenv;
 use anyhow::Result;
 use futures::StreamExt;
+use structopt::StructOpt;
+
+#[derive(Debug, StructOpt)]
+pub struct Args {
+    symbols: Vec<String>,
+}
+
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let args = Args::from_args();
     let mut client = Client::new(Source::default()).await?;
     //
     client.authenticate(AuthDataBuilder::default()
@@ -16,7 +24,7 @@ async fn main() -> Result<()> {
     //
     client.subscribe(
         SubscriptionDataBuilder::default()
-            .quotes(vec!["AAPL".to_string()])
+            .trades(args.symbols)
             .build()?
     ).await?;
     

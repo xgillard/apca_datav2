@@ -22,6 +22,7 @@ pub mod errors;
 pub mod data;
 pub mod historical;
 pub mod realtime;
+pub mod orders;
 
 /// This structure lets you interact easily with Alpaca's Market Data API v2.
 /// This is the structure you will want to instanciate whenever you intend to

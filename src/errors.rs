@@ -1,7 +1,8 @@
 //! This module provides a namespace to declare the errors that can occur 
 //! in this crate.
+use reqwest::Response;
 use tokio_tungstenite::tungstenite as tungstenite;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use serde_repr::{Serialize_repr, Deserialize_repr};
 use crate::data::{AuthDataBuilderError, SubscriptionDataBuilderError};
 
@@ -18,6 +19,8 @@ pub enum Error {
     Realtime(#[from] RealtimeError),
     #[error("error with Alpaca's history API {0}")]
     History(#[from] HistoryError),
+    #[error("error with Alpaca's order API {0}")]
+    Order(#[from] OrderError),
     #[error("error in the conversion from/to JSON")]
     Json(#[from] serde_json::Error),
     #[error("BUG: {0}")]
@@ -148,5 +151,65 @@ pub(crate) fn maybe_convert_to_hist_error(e: reqwest::Error) -> Error {
         }
     } else {
         Error::HttpError(e)
+    }
+}
+
+/*******************************************************************************
+ * ORDER API SPECIFIC STUFFS
+ ******************************************************************************/
+
+/// Basically, Alpaca has reused the standard meaning of HTTP statuses but
+/// this error type adds some 'business' information on top of it
+ #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize_repr, Deserialize_repr, thiserror::Error)]
+ #[repr(u16)]
+pub enum OrderError {
+    /// Buying power or shares is not sufficient
+    #[error("Buying power or shares is not sufficient")]
+    #[serde(rename="403")]
+    Forbidden = 403,
+    /// Order is not found
+    #[error("Order is not found")]
+    #[serde(rename="404")]
+    NotFound = 404,
+    /// Input parameters are not recognized
+    #[error("Input parameters are not recognized")]
+    #[serde(rename="422")]
+    Unprocessable = 422,
+    /// Failed to cancel order
+    #[error("Failed to cancel order")]
+    #[serde(rename="500")]
+    InternalServerError,
+
+    /// Should never occur
+    #[error("Unecpected http status")]
+    UnexpectedHttpStatus,
+}
+
+/// Attempts to convert an HTTP error into an order error. 
+/// Basically, Alpaca has reused the standard meaning of HTTP statuses but
+/// this error type adds some 'business' information on top of it
+pub(crate) fn maybe_convert_to_order_error(e: reqwest::Error) -> Error {
+    if let Some(status) = e.status() {
+        match status.as_u16() {
+            403 => Error::Order(OrderError::Forbidden),
+            404 => Error::Order(OrderError::NotFound),
+            422 => Error::Order(OrderError::Unprocessable),
+            500 => Error::Order(OrderError::InternalServerError),
+            _   => Error::HttpError(e)
+        }
+    } else {
+        Error::HttpError(e)
+    }
+}
+pub(crate) async fn status_code_to_order_error<T>(rsp: Response) -> Result<T, Error> 
+    where T: for<'de> Deserialize<'de>
+{
+    match rsp.status().as_u16() {
+        200 => Ok(rsp.json::<T>().await?),
+        403 => Err(Error::Order(OrderError::Forbidden)),
+        404 => Err(Error::Order(OrderError::NotFound)),
+        422 => Err(Error::Order(OrderError::Unprocessable)),
+        500 => Err(Error::Order(OrderError::InternalServerError)),
+        _   => Err(Error::Order(OrderError::UnexpectedHttpStatus)),
     }
 }

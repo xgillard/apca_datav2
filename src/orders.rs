@@ -17,11 +17,12 @@
 //! 
 //! Please note that body parameters should be passed using a JSON encoded body.
 
+use chrono::{DateTime, Utc};
 use reqwest::RequestBuilder;
 use serde::{Deserialize, Serialize};
 use derive_builder::Builder;
 
-use crate::{data::{AuthData, Order, OrderClass, OrderSide, OrderType, TimeInForce}, errors::{Error, maybe_convert_to_order_error, status_code_to_order_error}};
+use crate::{data::{AuthData, Direction, Order, OrderClass, OrderSide, OrderType, TimeInForce}, errors::{Error, maybe_convert_to_order_error, status_code_to_order_error}};
 
 
 /// Base URL to interact with live trading api
@@ -65,6 +66,20 @@ impl Client {
         .header(APCA_API_SECRET_KEY, &self.auth.secret)        
   }
 
+  /// Retrieves a list of orders for the account, filtered by the supplied 
+  /// query parameters.
+  pub async fn list_orders(&self, request: &ListOrderRequest) -> Result<Vec<Order>, Error> {
+    let url = format!("{}/{}", self.base_url, ORDERS);
+    let rsp = self.get_authenticated(&url)
+      .query(request)
+      .send().await
+      .map_err(maybe_convert_to_order_error)?;
+    status_code_to_order_error(rsp).await
+  }
+
+  /// Places a new order for the given account. An order request may be 
+  /// rejected if the account is not authorized for trading, or if the tradable
+  /// balance is insufficient to fill the order.
   pub async fn place_order(&self, request: &PlaceOrderRequest) -> Result<Order, Error> {
     let url = format!("{}/{}", self.base_url, ORDERS);
     let rsp = self.post_authenticated(&url)
@@ -74,6 +89,55 @@ impl Client {
     status_code_to_order_error(rsp).await
   }
 }
+
+/// Status when searching for a given order
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum SearchOrderStatus {
+  #[serde(rename="open")]
+  Open, 
+  #[serde(rename="closed")]
+  Closed,
+  #[serde(rename="all")]
+  All,
+}
+
+
+/// List Order Requests
+#[derive(Builder, Debug, Clone, Serialize, Deserialize)]
+pub struct ListOrderRequest {
+  /// Order status to be queried. open, closed or all. Defaults to open.
+  #[builder(setter(strip_option), default="None")]
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub status: Option<SearchOrderStatus>,
+  /// The maximum number of orders in response. Defaults to 50 and max is 500.
+  #[builder(setter(strip_option), default="None")]
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub limit: Option<u32>,
+  /// The response will include only ones submitted after this timestamp (exclusive.)
+  #[builder(setter(strip_option), default="None")]
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub after: Option<DateTime<Utc>>,
+  /// The response will include only ones submitted until this timestamp (exclusive.)
+  #[builder(setter(strip_option), default="None")]
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub until: Option<DateTime<Utc>>,
+  /// The chronological order of response based on the submission time. 
+  /// asc or desc. Defaults to desc.
+  #[builder(setter(strip_option), default="None")]
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub direction: Option<Direction>,
+  /// If true, the result will roll up multi-leg orders under the legs field 
+  /// of primary order.
+  #[builder(setter(strip_option), default="None")]
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub nested: Option<bool>,
+  /// A comma-separated list of symbols to filter by (ex. “AAPL,TSLA,MSFT”). 
+  /// A currency pair is required for crypto orders (ex. “BTCUSD,BCHUSD,LTCUSD,ETCUSD”).
+  #[builder(setter(strip_option), default="None")]
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub symbols: Option<String>,
+}
+
 /// Place Order Requests
 #[derive(Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct PlaceOrderRequest {

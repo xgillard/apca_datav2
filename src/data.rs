@@ -593,6 +593,15 @@ pub enum OrderSide {
     Sell
 }
 
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+pub enum Direction {
+    #[serde(rename="asc")]
+    Ascending,
+    #[serde(rename="desc")]
+    Descending
+}
+
 /// # Time in Force
 /// 
 /// Note: 

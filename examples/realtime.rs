@@ -1,5 +1,5 @@
 use apca_datav2::realtime::Client;
-use apca_datav2::data::{AuthDataBuilder, Response, Source, SubscriptionDataBuilder};
+use apca_datav2::realtime::{AuthDataBuilder, Response, Source, SubscriptionDataBuilder};
 use dotenv_codegen::dotenv;
 use anyhow::Result;
 use futures::StreamExt;

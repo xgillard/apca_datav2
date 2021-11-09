@@ -4,7 +4,7 @@ use reqwest::Response;
 use tokio_tungstenite::tungstenite as tungstenite;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Serialize_repr, Deserialize_repr};
-use crate::data::{AuthDataBuilderError, SubscriptionDataBuilderError};
+use crate::realtime::{AuthDataBuilderError, SubscriptionDataBuilderError};
 
 /*******************************************************************************
  * GENERIC STUFFS

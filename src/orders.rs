@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use derive_builder::Builder;
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
-use crate::{data::{Direction, Order, OrderClass, OrderSide, OrderType, TimeInForce}, errors::{Error, OrderError, maybe_convert_to_order_error, status_code_to_order_error}, rest::Client};
+use crate::{entities::{Direction, OrderData, OrderClass, OrderSide, OrderType, TimeInForce}, errors::{Error, OrderError, maybe_convert_to_order_error, status_code_to_order_error}, rest::Client};
 
 /// Path to the orders endpoint (used to list and place orders)
 pub const ORDERS: &str = "v2/orders";
@@ -30,7 +30,7 @@ pub const ORDERS: &str = "v2/orders";
 impl Client {
   /// Retrieves a list of orders for the account, filtered by the supplied 
   /// query parameters.
-  pub async fn list_orders(&self, request: &ListOrderRequest) -> Result<Vec<Order>, Error> {
+  pub async fn list_orders(&self, request: &ListOrderRequest) -> Result<Vec<OrderData>, Error> {
     let url = format!("{}/{}", self.env_url(), ORDERS);
     let rsp = self.get_authenticated(&url)
       .query(request)
@@ -42,7 +42,7 @@ impl Client {
   /// Places a new order for the given account. An order request may be 
   /// rejected if the account is not authorized for trading, or if the tradable
   /// balance is insufficient to fill the order.
-  pub async fn place_order(&self, request: &PlaceOrderRequest) -> Result<Order, Error> {
+  pub async fn place_order(&self, request: &PlaceOrderRequest) -> Result<OrderData, Error> {
     let url = format!("{}/{}", self.env_url(), ORDERS);
     let rsp = self.post_authenticated(&url)
       .json(request)
@@ -57,7 +57,7 @@ impl Client {
   /// - id: the order uuid
   /// - nested: If true, the result will roll up multi-leg orders under the 
   ///     legs field of primary order.
-  pub async fn get_by_id(&self, id: &str, nested: bool) -> Result<Order, Error> {
+  pub async fn get_by_id(&self, id: &str, nested: bool) -> Result<OrderData, Error> {
     let url = format!("{}/{}/{}", self.env_url(), ORDERS, id);
     let rsp = self.get_authenticated(&url)
       .query(&("nested", nested))
@@ -70,7 +70,7 @@ impl Client {
   /// 
   /// ## Parameters
   /// - id: the client order-id
-  pub async fn get_by_client_id(&self, id: &str) -> Result<Order, Error> {
+  pub async fn get_by_client_id(&self, id: &str) -> Result<OrderData, Error> {
     let url = format!("{}/{}:by_client_order_id", self.env_url(), ORDERS);
     let rsp = self.get_authenticated(&url)
       .query(&("client_order_id", id))
@@ -96,7 +96,7 @@ impl Client {
   /// power is calculated based on the newly placed order. If you are replacing 
   /// it with a lower limit price, the buying power is calculated based on the 
   /// old order.
-  pub async fn replace(&self, id: &str, replacement: &ReplacementRequest) -> Result<Order, Error> {
+  pub async fn replace(&self, id: &str, replacement: &ReplacementRequest) -> Result<OrderData, Error> {
     let url = format!("{}/{}/{}", self.env_url(), ORDERS, id);
     let rsp = self.patch_authenticated(&url)
       .json(replacement)
@@ -207,10 +207,10 @@ pub struct PlaceOrderRequest {
   pub side: OrderSide,
   /// market, limit, stop, stop_limit, or trailing_stop
   #[serde(rename="type")]
-  #[builder(default="crate::data::OrderType::Market")]
+  #[builder(default="crate::entities::OrderType::Market")]
   pub order_type: OrderType,
   /// day, gtc, opg, cls, ioc, fok. Please see Understand Orders for more info.
-  #[builder(default="crate::data::TimeInForce::Day")]
+  #[builder(default="crate::entities::TimeInForce::Day")]
   pub time_in_force: TimeInForce,
   /// required if type is limit or stop_limit
   #[builder(setter(strip_option))]
@@ -238,7 +238,7 @@ pub struct PlaceOrderRequest {
   pub client_order_id: Option<String>,
   /// simple, bracket, oco or oto. For details of non-simple order classes, 
   /// please see Bracket Order Overview
-  #[builder(default="crate::data::OrderClass::Simple")]
+  #[builder(default="crate::entities::OrderClass::Simple")]
   pub order_class: OrderClass,
 }
 /// Additional parameters for take-profit leg of advanced orders

@@ -46,13 +46,13 @@
 //! participant timestamps may have broader resolution such as milliseconds 
 //! or seconds.
 
-use std::{collections::HashMap, pin::Pin};
+use std::{collections::HashMap, fmt::Display, pin::Pin};
 
 use chrono::{DateTime, Utc};
 use futures::{Future, Stream};
 use itertools::Itertools;
-
-use crate::{data::{BarData, MultiBars, MultiQuotes, MultiTrades, QuoteData, SingleQuote, SingleSnapshot, SingleTrade, SnapshotData, TimeFrame, TradeData}, errors::{Error, maybe_convert_to_hist_error, status_code_to_hist_error}, rest::{Client, FetchNextPage, Paged, PagedStream}};
+use serde::{Serialize, Deserialize};
+use crate::{entities::{BarData, QuoteData, TradeData}, errors::{Error, maybe_convert_to_hist_error, status_code_to_hist_error}, rest::{Client, FetchNextPage, Paged, PagedStream}};
 
 /// Base URL to access historical data
 pub const BASE_URL: &str = "https://data.alpaca.markets/v2";
@@ -217,6 +217,124 @@ impl Client {
     }
 }
 
+/******************************************************************************
+ * HISTORY DATA POINTS ********************************************************
+ ******************************************************************************/
+
+ /// Timeframe for the aggregation. Available values are: 1Min, 1Hour, 1Day.
+ #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize)]
+ pub enum TimeFrame {
+    #[serde(rename="1Min")]
+    Minute, 
+    #[serde(rename="1Hour")]
+    Hour,
+    #[serde(rename="1Day")]
+    Day
+ }
+ impl Display for TimeFrame {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Minute => write!(f, "1Min"),
+            Self::Hour   => write!(f, "1Hour"),
+            Self::Day    => write!(f, "1Day"),
+        }
+    }
+}
+
+/// A datapoint that holds one single quote
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SingleQuote {
+    /// The symbol
+    pub symbol: String,
+    /// The actual payload
+    pub quote  : QuoteData,
+}
+/// A datapoint that holds one single quote
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultiQuotes {
+    /// The actual payload
+    #[serde(deserialize_with="crate::utils::null_as_emptyvec")]
+    pub quotes : Vec<QuoteData>,
+    /// The symbol
+    pub symbol: String,
+    #[serde(rename="next_page_token")]
+    pub token : Option<String>,
+}
+/// A datapoint that holds one single trade
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SingleTrade {
+    /// The symbol
+    pub symbol: String,
+    /// The actual payload
+    pub trade  : TradeData,
+}
+/// A datapoint that holds one single trade
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultiTrades {
+    /// The actual payload
+    #[serde(deserialize_with="crate::utils::null_as_emptyvec")]
+    pub trades : Vec<TradeData>,
+    /// The symbol
+    pub symbol: String,
+    #[serde(rename="next_page_token")]
+    pub token : Option<String>,
+}
+/// A datapoint that holds one single bar
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SingleBar {
+    /// The actual payload
+    pub bar  : BarData,
+    /// The symbol
+    pub symbol: String,
+}
+/// A datapoint that holds one single trade
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultiBars {
+    /// The actual payload
+    #[serde(deserialize_with="crate::utils::null_as_emptyvec")]
+    pub bars  : Vec<BarData>,
+    /// The symbol
+    pub symbol: String,
+    #[serde(rename="next_page_token")]
+    pub token : Option<String>,
+}
+
+/******************************************************************************
+ * SNAPSHOTS ******************************************************************
+ ******************************************************************************/
+
+/// The Snapshot API for one ticker provides the latest trade, latest quote, 
+/// minute bar daily bar and previous daily bar data for a given ticker symbol.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotData {
+    /// Latest trade object.
+    #[serde(rename = "latestTrade")]
+    pub latest_trade: TradeData,
+    /// Latest quote object
+    #[serde(rename = "latestQuote")]
+    pub latest_quote: QuoteData,
+    /// Minute bar object.
+    #[serde(rename = "minuteBar")]
+    pub minute_bar: BarData,
+    /// Daily bar object.
+    #[serde(rename = "dailyBar")]
+    pub daily_bar: BarData,
+    /// Previous daily close bar object
+    #[serde(rename = "prevDailyBar")]
+    pub prev_daily_bar: BarData,
+}
+
+/// The Snapshot API for one ticker provides the latest trade, latest quote, 
+/// minute bar daily bar and previous daily bar data for a given ticker symbol.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SingleSnapshot {
+    /// The symbol
+    pub symbol: String, 
+    /// The actual payload
+    #[serde(flatten)]
+    pub data: SnapshotData,
+}
+
 /*----------------------------------------------------------------------------*/
 /* THE MULTI-* DATA POINTS ARE STRUCTURES THAT EMBODY THE PAGING MECHANISM    */
 /*----------------------------------------------------------------------------*/
@@ -296,6 +414,7 @@ impl <'a> FetchNextPage<'a, MultiBars> for FetchNextBars<'a> {
         )
     }
 }
+
 /******************************************************************************
  ******************************************************************************
  ******************************************************************************/
@@ -306,20 +425,20 @@ mod test {
     use chrono::{TimeZone, Utc};
     use futures::StreamExt;
 
-    use crate::{data::{AuthData, MultiBars}, rest::Client};
+    use crate::{historical::MultiBars, rest::Client};
 
     #[tokio::test]
     async fn test_bars_stream() -> Result<(), anyhow::Error> {
-        let client   = Client::paper(AuthData { 
-            key: dotenv!("APCA_KEY_ID").to_string(), 
-            secret: dotenv!("APCA_SECRET").to_string() 
-        });
+        let client   = Client::paper(
+            dotenv!("APCA_KEY_ID").to_string(), 
+            dotenv!("APCA_SECRET").to_string() 
+        );
 
         let mut stream = client.bars(
             "AAPL", 
             Utc.ymd(2021,  8,  1).and_hms(0, 0, 0),
             Utc.ymd(2021,  8, 15).and_hms(0, 0, 0),
-            crate::data::TimeFrame::Day,
+            crate::historical::TimeFrame::Day,
             Some(3)
         );
 
@@ -332,10 +451,10 @@ mod test {
 
     #[tokio::test]
     async fn test_quotes_stream() -> Result<(), anyhow::Error> {
-        let client   = Client::paper(AuthData { 
-            key: dotenv!("APCA_KEY_ID").to_string(), 
-            secret: dotenv!("APCA_SECRET").to_string() 
-        });
+        let client   = Client::paper(
+            dotenv!("APCA_KEY_ID").to_string(), 
+            dotenv!("APCA_SECRET").to_string() 
+        );
 
         let mut stream = client.quotes(
             "AAPL", 
@@ -354,11 +473,11 @@ mod test {
 
     #[tokio::test]
     async fn test_trades_stream() -> Result<(), anyhow::Error> {
-        let client   = Client::paper(AuthData { 
-            key: dotenv!("APCA_KEY_ID").to_string(), 
-            secret: dotenv!("APCA_SECRET").to_string() 
-        });
-
+        let client   = Client::paper(
+            dotenv!("APCA_KEY_ID").to_string(), 
+            dotenv!("APCA_SECRET").to_string() 
+        );
+        
         let mut stream = client.trades(
             "AAPL", 
             Utc.ymd(2021,  8,  1).and_hms(16, 0, 0),
@@ -375,10 +494,10 @@ mod test {
     
     #[tokio::test]
     async fn test_snapshot() -> Result<(), anyhow::Error> {
-        let client   = Client::paper(AuthData { 
-            key: dotenv!("APCA_KEY_ID").to_string(), 
-            secret: dotenv!("APCA_SECRET").to_string() 
-        });
+        let client   = Client::paper(
+            dotenv!("APCA_KEY_ID").to_string(), 
+            dotenv!("APCA_SECRET").to_string() 
+        );
 
         let data = client.snapshot("AAPL").await?;
         println!("{:?}", data);
@@ -387,10 +506,10 @@ mod test {
     }
     #[tokio::test]
     async fn test_snapshots_multi() -> Result<(), anyhow::Error> {
-        let client   = Client::paper(AuthData { 
-            key: dotenv!("APCA_KEY_ID").to_string(), 
-            secret: dotenv!("APCA_SECRET").to_string() 
-        });
+        let client   = Client::paper(
+            dotenv!("APCA_KEY_ID").to_string(), 
+            dotenv!("APCA_SECRET").to_string() 
+        );
 
         let data = client.snapshots_multi("AAPL,MSFT,TSM").await?;
         println!("{:?}", data);
@@ -399,10 +518,10 @@ mod test {
     }
     #[tokio::test]
     async fn test_snapshots_multi_vec() -> Result<(), anyhow::Error> {
-        let client   = Client::paper(AuthData { 
-            key: dotenv!("APCA_KEY_ID").to_string(), 
-            secret: dotenv!("APCA_SECRET").to_string() 
-        });
+        let client   = Client::paper(
+            dotenv!("APCA_KEY_ID").to_string(), 
+            dotenv!("APCA_SECRET").to_string() 
+        );
 
         let data = client.snapshots_multi_vec(&["AAPL","MSFT","TSM"]).await?;
         println!("{:?}", data);

@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use apca_datav2::{data::{AuthDataBuilder, OrderSide}, orders::{ListOrderRequestBuilder, PlaceOrderRequestBuilder}, rest::Client};
+use apca_datav2::{entities::OrderSide, orders::{ListOrderRequestBuilder, PlaceOrderRequestBuilder}, rest::Client};
 use dotenv_codegen::dotenv;
 use anyhow::Result;
 use structopt::StructOpt;
@@ -38,12 +38,10 @@ impl FromStr for OrderStatus {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let auth   = AuthDataBuilder::default()
-      .key(dotenv!("APCA_KEY_ID").to_string())
-      .secret(dotenv!("APCA_SECRET").to_string())
-      .build()?;
-
-    let client = Client::paper(auth);
+    let client = Client::paper(
+      dotenv!("APCA_KEY_ID").to_string(),
+      dotenv!("APCA_SECRET").to_string()
+    );
     match Args::from_args() {
         Args::Buy  { symbol, qty, limit } => buy(&client, symbol, qty, limit).await?,
         Args::Sell { symbol, qty, limit } => sell(&client, symbol, qty, limit).await?,
@@ -64,7 +62,7 @@ async fn buy(client: &Client, symbol: String, qty: f64, limit: Option<f64>) -> R
   
     if let Some(limit) = limit {
       req_builder
-        .order_type(apca_datav2::data::OrderType::Limit)
+        .order_type(apca_datav2::entities::OrderType::Limit)
         .limit_price(limit);
     }
   let order_req = req_builder.build()?;
@@ -86,7 +84,7 @@ async fn sell(client: &Client, symbol: String, qty: f64, limit: Option<f64>) -> 
   
     if let Some(limit) = limit {
       req_builder
-        .order_type(apca_datav2::data::OrderType::Limit)
+        .order_type(apca_datav2::entities::OrderType::Limit)
         .limit_price(limit);
     }
   let order_req = req_builder.build()?;

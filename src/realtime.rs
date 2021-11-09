@@ -61,12 +61,13 @@
 //! participant timestamps may have broader resolution such as milliseconds or 
 //! seconds.
 
-use crate::data::{Source, Action, AuthData, Response, SubscriptionData};
-use crate::errors::Error;
+use crate::{entities::{BarData, QuoteData, TradeData}, errors::{Error, RealtimeErrorCode}};
 use futures::{SinkExt, StreamExt, stream::{SplitSink, SplitStream}};
 use tokio::net::TcpStream;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite as tungstenite};
 use tungstenite::{Message};
+use serde::{Serialize, Deserialize};
+use derive_builder::Builder;
 
 /// The websocket endpoint used to communicate with Alpaca's real time data v2 API
 const WSS_ENDPOINT : &str = "wss://stream.data.alpaca.markets/v2/";
@@ -169,3 +170,269 @@ impl ClientReceiver {
         .flatten()
     }
 }
+/******************************************************************************
+ * CLIENT TO SERVER ***********************************************************
+ ******************************************************************************/
+ 
+/// The data source for the real time data
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum Source {
+    /// Investor's Exchange (IEX) is the default datasource, and the one 
+    /// included in the free subscription plan
+    IEX,
+    /// If you intend to use SIP as data source (unlimited plan only)
+    SIP
+}
+impl Default for Source {
+    fn default() -> Self { Self::IEX }
+}
+impl std::fmt::Display for Source {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Self::IEX => write!(fmt, "iex"),
+            Self::SIP => write!(fmt, "sip"),
+        }
+    }
+}
+
+/// In order to interact with the server over the websocket, you'll need to 
+/// tell it what you want to do. Basically, the very first thing you'll want to
+/// do after connecting is to authenticate (failure to to so within a few 
+/// seconds will result in the receipt of an error control message).
+///
+/// Once authenticated you will have the opportunity to subscribe and 
+/// unsubscribe from messages you want to receive from Alpaca.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "action")]
+pub enum Action {
+    #[serde(rename = "auth")] 
+    Authenticate(AuthData), 
+    #[serde(rename = "subscribe")] 
+    Subscribe(SubscriptionData),
+    #[serde(rename = "unsubscribe")] 
+    Unsubscribe(SubscriptionData),
+}
+
+/// After connecting you will have to authenticate as follows:
+/// ```{"action":"auth","key":"PK************","secret":"************"}```
+#[derive(Debug, Clone, Serialize, Builder)]
+pub struct AuthData {
+    pub key:    String,
+    pub secret: String,
+}
+
+/// You can subscribe to trades, quotes and bars of a particular symbol 
+/// (or * for every symbol in the case of bars). A subscribe message should 
+/// contain what subscription you want to add to your current subscriptions in 
+/// your session so you don’t have to send what you’re already subscribed to.
+///
+/// You can also omit either one of them (trades,quotes or bars) if you don’t 
+/// want to subscribe to any symbols in that category but be sure to include at 
+/// least one of the three.
+///
+/// Subscription data is also used when you mean to send an `unsubscribe` 
+/// message that subtracts the list of subscriptions specified from your current
+/// set of subscriptions.
+#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
+pub struct SubscriptionData {
+    #[builder(setter(strip_option), default)]
+    pub trades: Option<Vec<String>>,
+    #[builder(setter(strip_option), default)]
+    pub quotes: Option<Vec<String>>,
+    #[builder(setter(strip_option), default)]
+    pub bars  : Option<Vec<String>>,
+}
+
+
+/******************************************************************************
+ * SERVER TO CLIENT ***********************************************************
+ ******************************************************************************/
+/// Every message you receive from the server will be in the format:
+///
+/// ```json
+/// [{"T": "{message_type}", {contents}},...]
+/// ```
+/// Control messages (i.e. where "T" is error, success or subscription) always 
+/// arrive in arrays of size one to make their processing easier.
+/// 
+/// Data points however may arrive in arrays that have a length that is greater 
+/// than one. This is to facilitate clients whose connection is not fast enough 
+/// to handle data points sent one by one. Our server buffers the outgoing 
+/// messages but slow clients may get disconnected if their buffer becomes full.
+///
+/// # Communication flow
+/// The communication can be thought of as two separate phases: 
+/// establishment and receiving data.
+/// 
+/// ## Establishment
+/// To establish the connection first you will need to connect to our server 
+/// using the URL above. Upon successfully connecting, you will receive the 
+/// welcome message: 
+/// ```json
+/// [{"T":"success","msg":"connected"}]
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "T")]
+pub enum Response {
+    /// Obviously, this variant is used to denote control message informing 
+    /// you that some error has happened. You may receive an error during your 
+    /// session. You can differentiate between them using the list below:
+    /// 
+    /// * The message you sent to the server did not follow the specification
+    ///   ```[{"T":"error","code":400,"msg":"invalid syntax"}]```
+    /// 
+    /// * You have attempted to subscribe or unsubscribe before authentication
+    ///   ```[{"T":"error","code":401,"msg":"not authenticated"}]```
+    ///
+    /// * You have provided invalid authentication credentials.
+    ///   ```[{"T":"error","code":402,"msg":"auth failed"}]```
+    ///
+    /// * You have already successfully authenticated during your current session.
+    ///   ```[{"T":"error","code":404,"msg":"auth timeout"}]```
+    ///
+    /// * You failed to successfully authenticate after connecting. 
+    ///   You have a few seconds to authenticate after connecting.
+    ///   ```[{"T":"error","code":404,"msg":"auth timeout"}]```
+    /// 
+    /// * The symbol subscription request you sent would put you over the limit 
+    ///   set by your subscription package. If this happens your symbol 
+    ///   subscriptions are the same as they were before you sent the request 
+    ///   that failed.
+    ///   ```[{"T":"error","code":405,"msg":"symbol limit exceeded"}]```
+    /// 
+    /// * You already have an ongoing authenticated session.
+    ///   ```[{"T":"error","code":406,"msg":"connection limit exceeded"}]```
+    ///
+    /// * You may receive this if you are too slow to process the messages sent 
+    ///   by the server. Please note that this is not guaranteed to arrive 
+    ///   before you are disconnected to avoid keeping slow connections active 
+    ///   forever
+    ///   ```[{"T":"error","code":407,"msg":"slow client"}]```
+    ///
+    /// * Your account does not have access to Data v2.
+    ///   ```[{"T":"error","code":408,"msg":"v2 not enabled"}]```
+    ///
+    /// * You have attempted to access a data source not available in your 
+    ///   subscription package.
+    ///   ```[{"T":"error","code":409,"msg":"insufficient subscription"}]```
+    ///
+    /// * An unexpected error occurred on our end and we are investigating the issue.
+    ///   ```[{"T":"error","code":500,"msg":"internal error"}```
+    #[serde(rename="error")]
+    Error(RealtimeErrorCode),
+    /// This variant denotes a **control message** meant to inform you of the
+    /// successful completion of the action you requested. For instance, 
+    /// upon successfully connecting, you will receive the  welcome message: 
+    /// ```json
+    /// [{"T":"success","msg":"connected"}]
+    /// ```
+    ///
+    /// Similarly, after connecting with proper credentials you will receive 
+    /// another success message: 
+    /// ```json
+    /// [{"T":"success","msg":"authenticated"}]
+    /// ```
+    #[serde(rename="success")]
+    Success{#[serde(rename="msg")] message: String},
+    /// After subscribing or unsubscribing you will receive a message that 
+    /// describes your current list of subscriptions.
+    /// ```json
+    /// [{"T":"subscription","trades":["AAPL"],"quotes":["AMD","CLDR"],"bars":["IBM","AAPL","VOO"]}]
+    /// ```
+    ///
+    /// **Note**: 
+    /// You will always receive your entire list of subscriptions, as  
+    /// illustrated by the sample communication excerpt below: 
+    /// ```json
+    /// > {"action": "subscribe", "trades": ["AAPL"], "quotes": ["AMD", "CLDR"], "bars": ["*"]}
+    /// < [{"T":"subscription","trades":["AAPL"],"quotes":["AMD","CLDR"],"bars":["*"]}]
+    /// > {"action": "unsubscribe", "bars": ["*"]}
+    /// > [{"T":"subscription","trades":["AAPL"],"quotes":["AMD","CLDR"],"bars":[]}]
+    /// ```
+    #[serde(rename="subscription")]
+    Subscription(SubscriptionData),
+
+    // --- DATA POINTS --------------------------------------------------------
+    #[serde(rename="t")]
+    Trade(DataPoint<TradeData>),
+    #[serde(rename="q")]
+    Quote(DataPoint<QuoteData>),
+    #[serde(rename="b")]
+    Bar(DataPoint<BarData>),
+}
+
+/// A generic datapoint that holds information related to a given symbol
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DataPoint<T> {
+    /// The symbol
+    #[serde(rename="S")]
+    pub symbol: String,
+    /// The actual payload
+    #[serde(flatten)]
+    pub data  : T,
+}
+
+
+/******************************************************************************
+ * TESTS **********************************************************************
+ ******************************************************************************/
+
+ #[cfg(test)]
+ mod tests {
+    use crate::realtime::Response;
+ 
+     #[test]
+    fn test_deserialize_trade() {
+        let txt = r#"{
+            "T": "t",
+            "i": 96921,
+            "S": "AAPL",
+            "x": "D",
+            "p": 126.55,
+            "s": 1,
+            "t": "2021-02-22T15:51:44.208Z",
+            "c": [
+              "@",
+              "I"
+            ],
+            "z": "C"
+          }"#;
+        let deserialized = serde_json::from_str::<Response>(txt);
+        assert!(deserialized.is_ok());
+    }
+    #[test]
+    fn test_deserialize_quote() {
+        let txt = r#"{
+            "T": "q",
+            "S": "AMD",
+            "bx": "U",
+            "bp": 87.66,
+            "bs": 1,
+            "ax": "Q",
+            "ap": 87.68,
+            "as": 4,
+            "t": "2021-02-22T15:51:45.335689322Z",
+            "c": [
+              "R"
+            ],
+            "z": "C"
+          }"#;
+          let deserialized = serde_json::from_str::<Response>(txt);
+          assert!(deserialized.is_ok());
+    }
+    #[test]
+    fn test_deserialize_bar() {
+        let txt = r#"{
+            "T": "b",
+            "S": "SPY",
+            "o": 388.985,
+            "h": 389.13,
+            "l": 388.975,
+            "c": 389.12,
+            "v": 49378,
+            "t": "2021-02-22T19:15:00Z"
+          }"#;
+          let deserialized = serde_json::from_str::<Response>(txt);
+          assert!(deserialized.is_ok());
+    }
+ }

@@ -11,8 +11,9 @@
 //! direct feeds from the CTA (administered by NYSE) and UTP (administered by 
 //! Nasdaq) SIPs. These 2 feeds combined offer 100% market volume.
 
+mod utils;
 pub mod errors;
-pub mod data;
+pub mod entities;
 pub mod realtime;
 
 pub mod rest;

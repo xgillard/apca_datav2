@@ -7,7 +7,7 @@ use std::{pin::Pin, task::Poll};
 use futures::{Future, FutureExt, Stream};
 use reqwest::RequestBuilder;
 
-use crate::{data::AuthData, errors::Error};
+use crate::errors::Error;
 
 /// Header used to send the key-id authentication
 pub const APCA_API_KEY_ID: &str = "APCA-API-KEY-ID";
@@ -22,41 +22,42 @@ pub const PAPER_TRADING_URL: &str = "https://paper-api.alpaca.markets";
 
 /// An authenticated REST client
 pub struct Client {
-    auth:   AuthData,
+    key: String,
+    secret: String,
     client: reqwest::Client,
     env_url: &'static str,
 }
 
 impl Client {
-  pub fn live(auth: AuthData) -> Self {
-    Self::new(auth, true)
+  pub fn live(key: String, secret: String) -> Self {
+    Self::new(key, secret, true)
   }
-  pub fn paper(auth: AuthData) -> Self {
-    Self::new(auth, false)
+  pub fn paper(key: String, secret: String) -> Self {
+    Self::new(key, secret, false)
   }
-  pub fn new(auth: AuthData, live: bool) -> Self {
+  pub fn new(key: String, secret: String, live: bool) -> Self {
     let env_url = if live { LIVE_TRADING_URL } else { PAPER_TRADING_URL };
-    Self {auth, client: reqwest::Client::new(), env_url}
+    Self {key, secret, client: reqwest::Client::new(), env_url}
   }
   pub fn get_authenticated(&self, url: &str) -> RequestBuilder {
     self.client.get(url)
-        .header(APCA_API_KEY_ID,     &self.auth.key)
-        .header(APCA_API_SECRET_KEY, &self.auth.secret)        
+        .header(APCA_API_KEY_ID,     &self.key)
+        .header(APCA_API_SECRET_KEY, &self.secret)        
   }
   pub fn post_authenticated(&self, url: &str) -> RequestBuilder {
     self.client.post(url)
-        .header(APCA_API_KEY_ID,     &self.auth.key)
-        .header(APCA_API_SECRET_KEY, &self.auth.secret)        
+        .header(APCA_API_KEY_ID,     &self.key)
+        .header(APCA_API_SECRET_KEY, &self.secret)        
   }
   pub fn patch_authenticated(&self, url: &str) -> RequestBuilder {
     self.client.patch(url)
-        .header(APCA_API_KEY_ID,     &self.auth.key)
-        .header(APCA_API_SECRET_KEY, &self.auth.secret)        
+        .header(APCA_API_KEY_ID,     &self.key)
+        .header(APCA_API_SECRET_KEY, &self.secret)        
   }
   pub fn delete_authenticated(&self, url: &str) -> RequestBuilder {
     self.client.delete(url)
-        .header(APCA_API_KEY_ID,     &self.auth.key)
-        .header(APCA_API_SECRET_KEY, &self.auth.secret)        
+        .header(APCA_API_KEY_ID,     &self.key)
+        .header(APCA_API_SECRET_KEY, &self.secret)        
   }
   pub fn env_url(&self) -> &'static str {
     self.env_url

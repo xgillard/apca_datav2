@@ -1,222 +1,13 @@
-//! This module provides the definition of the protocol objects used in 
-//! Alpaca's data API v2.
+//! This module provides the definition of the entity objects used in 
+//! Alpaca's API v2.
 
 extern crate serde;
-use std::fmt::Display;
-
-use derive_builder::Builder;
 use chrono::{DateTime, Utc};
 use serde::{Serialize, Deserialize};
-use serde_json::Value;
-
-use crate::errors::RealtimeErrorCode;
-
-/******************************************************************************
- * CLIENT TO SERVER ***********************************************************
- ******************************************************************************/
- 
-/// The data source for the real time data
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub enum Source {
-    /// Investor's Exchange (IEX) is the default datasource, and the one 
-    /// included in the free subscription plan
-    IEX,
-    /// If you intend to use SIP as data source (unlimited plan only)
-    SIP
-}
-impl Default for Source {
-    fn default() -> Self { Self::IEX }
-}
-impl std::fmt::Display for Source {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            Self::IEX => write!(fmt, "iex"),
-            Self::SIP => write!(fmt, "sip"),
-        }
-    }
-}
-
-/// In order to interact with the server over the websocket, you'll need to 
-/// tell it what you want to do. Basically, the very first thing you'll want to
-/// do after connecting is to authenticate (failure to to so within a few 
-/// seconds will result in the receipt of an error control message).
-///
-/// Once authenticated you will have the opportunity to subscribe and 
-/// unsubscribe from messages you want to receive from Alpaca.
-#[derive(Debug, Clone, Serialize)]
-#[serde(tag = "action")]
-pub enum Action {
-    #[serde(rename = "auth")] 
-    Authenticate(AuthData), 
-    #[serde(rename = "subscribe")] 
-    Subscribe(SubscriptionData),
-    #[serde(rename = "unsubscribe")] 
-    Unsubscribe(SubscriptionData),
-}
-
-/// After connecting you will have to authenticate as follows:
-/// ```{"action":"auth","key":"PK************","secret":"************"}```
-#[derive(Debug, Clone, Serialize, Builder)]
-pub struct AuthData {
-    pub key:    String,
-    pub secret: String,
-}
-
-/// You can subscribe to trades, quotes and bars of a particular symbol 
-/// (or * for every symbol in the case of bars). A subscribe message should 
-/// contain what subscription you want to add to your current subscriptions in 
-/// your session so you don’t have to send what you’re already subscribed to.
-///
-/// You can also omit either one of them (trades,quotes or bars) if you don’t 
-/// want to subscribe to any symbols in that category but be sure to include at 
-/// least one of the three.
-///
-/// Subscription data is also used when you mean to send an `unsubscribe` 
-/// message that subtracts the list of subscriptions specified from your current
-/// set of subscriptions.
-#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
-pub struct SubscriptionData {
-    #[builder(setter(strip_option), default)]
-    pub trades: Option<Vec<String>>,
-    #[builder(setter(strip_option), default)]
-    pub quotes: Option<Vec<String>>,
-    #[builder(setter(strip_option), default)]
-    pub bars  : Option<Vec<String>>,
-}
-
-
-/******************************************************************************
- * SERVER TO CLIENT ***********************************************************
- ******************************************************************************/
-/// Every message you receive from the server will be in the format:
-///
-/// ```json
-/// [{"T": "{message_type}", {contents}},...]
-/// ```
-/// Control messages (i.e. where "T" is error, success or subscription) always 
-/// arrive in arrays of size one to make their processing easier.
-/// 
-/// Data points however may arrive in arrays that have a length that is greater 
-/// than one. This is to facilitate clients whose connection is not fast enough 
-/// to handle data points sent one by one. Our server buffers the outgoing 
-/// messages but slow clients may get disconnected if their buffer becomes full.
-///
-/// # Communication flow
-/// The communication can be thought of as two separate phases: 
-/// establishment and receiving data.
-/// 
-/// ## Establishment
-/// To establish the connection first you will need to connect to our server 
-/// using the URL above. Upon successfully connecting, you will receive the 
-/// welcome message: 
-/// ```json
-/// [{"T":"success","msg":"connected"}]
-/// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "T")]
-pub enum Response {
-    /// Obviously, this variant is used to denote control message informing 
-    /// you that some error has happened. You may receive an error during your 
-    /// session. You can differentiate between them using the list below:
-    /// 
-    /// * The message you sent to the server did not follow the specification
-    ///   ```[{"T":"error","code":400,"msg":"invalid syntax"}]```
-    /// 
-    /// * You have attempted to subscribe or unsubscribe before authentication
-    ///   ```[{"T":"error","code":401,"msg":"not authenticated"}]```
-    ///
-    /// * You have provided invalid authentication credentials.
-    ///   ```[{"T":"error","code":402,"msg":"auth failed"}]```
-    ///
-    /// * You have already successfully authenticated during your current session.
-    ///   ```[{"T":"error","code":404,"msg":"auth timeout"}]```
-    ///
-    /// * You failed to successfully authenticate after connecting. 
-    ///   You have a few seconds to authenticate after connecting.
-    ///   ```[{"T":"error","code":404,"msg":"auth timeout"}]```
-    /// 
-    /// * The symbol subscription request you sent would put you over the limit 
-    ///   set by your subscription package. If this happens your symbol 
-    ///   subscriptions are the same as they were before you sent the request 
-    ///   that failed.
-    ///   ```[{"T":"error","code":405,"msg":"symbol limit exceeded"}]```
-    /// 
-    /// * You already have an ongoing authenticated session.
-    ///   ```[{"T":"error","code":406,"msg":"connection limit exceeded"}]```
-    ///
-    /// * You may receive this if you are too slow to process the messages sent 
-    ///   by the server. Please note that this is not guaranteed to arrive 
-    ///   before you are disconnected to avoid keeping slow connections active 
-    ///   forever
-    ///   ```[{"T":"error","code":407,"msg":"slow client"}]```
-    ///
-    /// * Your account does not have access to Data v2.
-    ///   ```[{"T":"error","code":408,"msg":"v2 not enabled"}]```
-    ///
-    /// * You have attempted to access a data source not available in your 
-    ///   subscription package.
-    ///   ```[{"T":"error","code":409,"msg":"insufficient subscription"}]```
-    ///
-    /// * An unexpected error occurred on our end and we are investigating the issue.
-    ///   ```[{"T":"error","code":500,"msg":"internal error"}```
-    #[serde(rename="error")]
-    Error(RealtimeErrorCode),
-    /// This variant denotes a **control message** meant to inform you of the
-    /// successful completion of the action you requested. For instance, 
-    /// upon successfully connecting, you will receive the  welcome message: 
-    /// ```json
-    /// [{"T":"success","msg":"connected"}]
-    /// ```
-    ///
-    /// Similarly, after connecting with proper credentials you will receive 
-    /// another success message: 
-    /// ```json
-    /// [{"T":"success","msg":"authenticated"}]
-    /// ```
-    #[serde(rename="success")]
-    Success{#[serde(rename="msg")] message: String},
-    /// After subscribing or unsubscribing you will receive a message that 
-    /// describes your current list of subscriptions.
-    /// ```json
-    /// [{"T":"subscription","trades":["AAPL"],"quotes":["AMD","CLDR"],"bars":["IBM","AAPL","VOO"]}]
-    /// ```
-    ///
-    /// **Note**: 
-    /// You will always receive your entire list of subscriptions, as  
-    /// illustrated by the sample communication excerpt below: 
-    /// ```json
-    /// > {"action": "subscribe", "trades": ["AAPL"], "quotes": ["AMD", "CLDR"], "bars": ["*"]}
-    /// < [{"T":"subscription","trades":["AAPL"],"quotes":["AMD","CLDR"],"bars":["*"]}]
-    /// > {"action": "unsubscribe", "bars": ["*"]}
-    /// > [{"T":"subscription","trades":["AAPL"],"quotes":["AMD","CLDR"],"bars":[]}]
-    /// ```
-    #[serde(rename="subscription")]
-    Subscription(SubscriptionData),
-
-    // --- DATA POINTS --------------------------------------------------------
-    #[serde(rename="t")]
-    Trade(DataPoint<TradeData>),
-    #[serde(rename="q")]
-    Quote(DataPoint<QuoteData>),
-    #[serde(rename="b")]
-    Bar(DataPoint<BarData>),
-}
 
 /******************************************************************************
  * DATA POINTS ****************************************************************
  ******************************************************************************/
-
-/// A generic datapoint that holds information related to a given symbol
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DataPoint<T> {
-    /// The symbol
-    #[serde(rename="S")]
-    pub symbol: String,
-    /// The actual payload
-    #[serde(flatten)]
-    pub data  : T,
-}
-
  /// Datapoint encapsulating informations about a given trade
  #[derive(Debug, Clone, Serialize, Deserialize)]
  pub struct TradeData {
@@ -388,172 +179,6 @@ pub struct DataPoint<T> {
     #[serde(rename="Z")]
     CboeBzx,
  }
-
-/******************************************************************************
- * HISTORY DATA POINTS ********************************************************
- ******************************************************************************/
-
- /// Timeframe for the aggregation. Available values are: 1Min, 1Hour, 1Day.
- #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize)]
- pub enum TimeFrame {
-    #[serde(rename="1Min")]
-    Minute, 
-    #[serde(rename="1Hour")]
-    Hour,
-    #[serde(rename="1Day")]
-    Day
- }
- impl Display for TimeFrame {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Minute => write!(f, "1Min"),
-            Self::Hour   => write!(f, "1Hour"),
-            Self::Day    => write!(f, "1Day"),
-        }
-    }
-}
-
-/// A datapoint that holds one single quote
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SingleQuote {
-    /// The symbol
-    pub symbol: String,
-    /// The actual payload
-    pub quote  : QuoteData,
-}
-/// A datapoint that holds one single quote
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MultiQuotes {
-    /// The actual payload
-    #[serde(deserialize_with="null_as_emptyvec")]
-    pub quotes : Vec<QuoteData>,
-    /// The symbol
-    pub symbol: String,
-    #[serde(rename="next_page_token")]
-    pub token : Option<String>,
-}
-/// A datapoint that holds one single trade
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SingleTrade {
-    /// The symbol
-    pub symbol: String,
-    /// The actual payload
-    pub trade  : TradeData,
-}
-/// A datapoint that holds one single trade
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MultiTrades {
-    /// The actual payload
-    #[serde(deserialize_with="null_as_emptyvec")]
-    pub trades : Vec<TradeData>,
-    /// The symbol
-    pub symbol: String,
-    #[serde(rename="next_page_token")]
-    pub token : Option<String>,
-}
-/// A datapoint that holds one single bar
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SingleBar {
-    /// The actual payload
-    pub bar  : BarData,
-    /// The symbol
-    pub symbol: String,
-}
-/// A datapoint that holds one single trade
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MultiBars {
-    /// The actual payload
-    #[serde(deserialize_with="null_as_emptyvec")]
-    pub bars  : Vec<BarData>,
-    /// The symbol
-    pub symbol: String,
-    #[serde(rename="next_page_token")]
-    pub token : Option<String>,
-}
-
-fn null_as_emptyvec<'de, T, D>(d: D) -> Result<Vec<T>, D::Error>
-where D: serde::Deserializer<'de>,
-      T: serde::Deserialize<'de>
-{
-    Deserialize::deserialize(d)
-        .map(|x: Option<_>| {
-            x.unwrap_or_default()
-        })
-}
-
-fn number_as_f64<'de, D>(d: D) -> Result<f64, D::Error>
-where D: serde::Deserializer<'de>,
-{
-    match Value::deserialize(d)? {
-        Value::String(txt) => 
-            if let Ok(val) = txt.parse::<f64>() {
-                Ok(val)
-            } else {
-                Err(serde::de::Error::custom("expected a number"))
-            },
-        Value::Number(num) => 
-            Ok(num.as_f64().ok_or_else(|| serde::de::Error::custom("Invalid number"))?),
-        _ => 
-            Err(serde::de::Error::custom("expected a number"))
-    }
-}
-
-fn option_as_f64<'de, D>(d: D) -> Result<Option<f64>, D::Error>
-where D: serde::Deserializer<'de>,
-{
-    match Value::deserialize(d)? {
-        Value::String(txt) => 
-            if let Ok(val) = txt.parse::<f64>() {
-                Ok(Some(val))
-            } else {
-                Err(serde::de::Error::custom("expected a number"))
-            },
-        Value::Number(num) => 
-            Ok(Some(num.as_f64().ok_or_else(|| serde::de::Error::custom("Invalid number"))?)),
-        Value::Null => 
-            Ok(None),
-        _ => 
-            Err(serde::de::Error::custom("expected a number"))
-    }
-}
-
-
-
-/******************************************************************************
- * SNAPSHOTS ******************************************************************
- ******************************************************************************/
-
-/// The Snapshot API for one ticker provides the latest trade, latest quote, 
-/// minute bar daily bar and previous daily bar data for a given ticker symbol.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SnapshotData {
-    /// Latest trade object.
-    #[serde(rename = "latestTrade")]
-    pub latest_trade: TradeData,
-    /// Latest quote object
-    #[serde(rename = "latestQuote")]
-    pub latest_quote: QuoteData,
-    /// Minute bar object.
-    #[serde(rename = "minuteBar")]
-    pub minute_bar: BarData,
-    /// Daily bar object.
-    #[serde(rename = "dailyBar")]
-    pub daily_bar: BarData,
-    /// Previous daily close bar object
-    #[serde(rename = "prevDailyBar")]
-    pub prev_daily_bar: BarData,
-}
-
-/// The Snapshot API for one ticker provides the latest trade, latest quote, 
-/// minute bar daily bar and previous daily bar data for a given ticker symbol.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SingleSnapshot {
-    /// The symbol
-    pub symbol: String, 
-    /// The actual payload
-    #[serde(flatten)]
-    pub data: SnapshotData,
-}
 
 /******************************************************************************
  * ORDERS *********************************************************************
@@ -837,7 +462,7 @@ pub enum OrderStatus {
 /// The Snapshot API for one ticker provides the latest trade, latest quote, 
 /// minute bar daily bar and previous daily bar data for a given ticker symbol.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Order {
+pub struct OrderData {
     /// Order ID
     pub id: String,
     /// Client unique order ID
@@ -866,13 +491,13 @@ pub struct Order {
     pub notional: Option<f64>,
     /// Ordered quantity. If entered, notional will be null. 
     /// Can take up to 9 decimal points.
-    #[serde(deserialize_with="option_as_f64")]
+    #[serde(deserialize_with="crate::utils::option_as_f64")]
     pub qty: Option<f64>,
     /// Filled quantity
-    #[serde(deserialize_with="number_as_f64")]
+    #[serde(deserialize_with="crate::utils::number_as_f64")]
     pub filled_qty: f64,
     /// Filled average price
-    #[serde(deserialize_with="option_as_f64")]
+    #[serde(deserialize_with="crate::utils::option_as_f64")]
     pub filled_avg_price: Option<f64>,
     /// simple, bracket, oco or oto. For details of non-simple order 
     /// classes, please see ![bracket](https://alpaca.markets/docs/trading-on-alpaca/orders#bracket-orders "Bracket Order Overview")
@@ -885,10 +510,10 @@ pub struct Order {
     /// See ![TimeInForce](https://alpaca.markets/docs/trading-on-alpaca/orders/#time-in-force "Time in Force")
     pub time_in_force: TimeInForce,
     /// Limit price
-    #[serde(deserialize_with="option_as_f64")]
+    #[serde(deserialize_with="crate::utils::option_as_f64")]
     pub limit_price: Option<f64>,
     /// Stop price
-    #[serde(deserialize_with="option_as_f64")]
+    #[serde(deserialize_with="crate::utils::option_as_f64")]
     pub stop_price: Option<f64>,
     /// The current status of the order in its lifecycle
     pub status: OrderStatus,
@@ -896,16 +521,16 @@ pub struct Order {
     pub extended_hours: bool,
     /// When querying non-simple order_class orders in a nested style, an array 
     /// of Order entities associated with this order. Otherwise, null.
-    pub legs: Option<Vec<Order>>,
+    pub legs: Option<Vec<OrderData>>,
     /// The percent value away from the high water mark for trailing stop orders.
-    #[serde(deserialize_with="option_as_f64")]
+    #[serde(deserialize_with="crate::utils::option_as_f64")]
     pub trail_percent: Option<f64>,
     /// The dollar value away from the high water mark for trailing stop orders.
-    #[serde(deserialize_with="option_as_f64")]
+    #[serde(deserialize_with="crate::utils::option_as_f64")]
     pub trail_price: Option<f64>,
     /// The highest (lowest) market price seen since the trailing stop order was 
     /// submitted.
-    #[serde(deserialize_with="option_as_f64")]
+    #[serde(deserialize_with="crate::utils::option_as_f64")]
     pub hwm: Option<f64>,
 }
 
@@ -915,62 +540,7 @@ pub struct Order {
 
 #[cfg(test)]
 mod tests {
-   use crate::data::{Order, Response};
-
-    #[test]
-   fn test_deserialize_trade() {
-       let txt = r#"{
-           "T": "t",
-           "i": 96921,
-           "S": "AAPL",
-           "x": "D",
-           "p": 126.55,
-           "s": 1,
-           "t": "2021-02-22T15:51:44.208Z",
-           "c": [
-             "@",
-             "I"
-           ],
-           "z": "C"
-         }"#;
-       let deserialized = serde_json::from_str::<Response>(txt);
-       assert!(deserialized.is_ok());
-   }
-   #[test]
-   fn test_deserialize_quote() {
-       let txt = r#"{
-           "T": "q",
-           "S": "AMD",
-           "bx": "U",
-           "bp": 87.66,
-           "bs": 1,
-           "ax": "Q",
-           "ap": 87.68,
-           "as": 4,
-           "t": "2021-02-22T15:51:45.335689322Z",
-           "c": [
-             "R"
-           ],
-           "z": "C"
-         }"#;
-         let deserialized = serde_json::from_str::<Response>(txt);
-         assert!(deserialized.is_ok());
-   }
-   #[test]
-   fn test_deserialize_bar() {
-       let txt = r#"{
-           "T": "b",
-           "S": "SPY",
-           "o": 388.985,
-           "h": 389.13,
-           "l": 388.975,
-           "c": 389.12,
-           "v": 49378,
-           "t": "2021-02-22T19:15:00Z"
-         }"#;
-         let deserialized = serde_json::from_str::<Response>(txt);
-         assert!(deserialized.is_ok());
-   }
+   use crate::entities::OrderData;
 
    #[test]
    fn test_deserialize_order() {
@@ -1008,7 +578,7 @@ mod tests {
             "trail_price":null,
             "hwm":null
         }"#;
-      let deserialized = serde_json::from_str::<Order>(txt);
+      let deserialized = serde_json::from_str::<OrderData>(txt);
       println!("{:?}", deserialized);
       assert!(deserialized.is_ok());
    }

@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use apca_datav2::{data::{AuthDataBuilder, OrderSide}, orders::{ListOrderRequestBuilder, PlaceOrderRequestBuilder}, rest::Client};
 use dotenv_codegen::dotenv;
 use anyhow::Result;
@@ -7,8 +9,31 @@ use structopt::StructOpt;
 pub enum Args {
   Buy {symbol: String, qty: f64, limit: Option<f64>},
   Sell{symbol: String, qty: f64, limit: Option<f64>},
-  List{symbols: String},
+  List{#[structopt(default_value="*")] status: OrderStatus, symbols: Option<String>},
   Cancel{id: Option<String>},
+}
+
+#[derive(Debug, StructOpt)]
+pub enum OrderStatus {
+  All, Open, Closed
+}
+impl Default for OrderStatus {
+  fn default() -> Self {
+    Self::All
+  }
+}
+impl FromStr for OrderStatus {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+          "*"      => Ok(Self::All),
+          "all"    => Ok(Self::All),
+          "open"   => Ok(Self::Open),
+          "closed" => Ok(Self::Closed),
+          _        => Err(s.to_string())
+        }
+    }
 }
 
 #[tokio::main]
@@ -22,7 +47,7 @@ async fn main() -> Result<()> {
     match Args::from_args() {
         Args::Buy  { symbol, qty, limit } => buy(&client, symbol, qty, limit).await?,
         Args::Sell { symbol, qty, limit } => sell(&client, symbol, qty, limit).await?,
-        Args::List { symbols }            => list(&client, symbols).await?,
+        Args::List { symbols, status }    => list(&client, symbols, status).await?,
         Args::Cancel{ id }                => cancel(&client, id).await?,
     }
 
@@ -73,16 +98,29 @@ async fn sell(client: &Client, symbol: String, qty: f64, limit: Option<f64>) -> 
 
   Ok(())
 }
-async fn list(client: &Client, symbols: String) -> Result<()> {
+async fn list(client: &Client, symbols: Option<String>, status: OrderStatus) -> Result<()> {
   println!("### Orders ####################################################");
-  let list_req = ListOrderRequestBuilder::default()
-    .symbols(symbols)
-    .status(apca_datav2::orders::SearchOrderStatus::All)
-    .build()?;
+  let mut builder = ListOrderRequestBuilder::default();
+
+  if let Some(symbols) = symbols {
+    builder.symbols(symbols);
+  }
+
+  match status {
+    OrderStatus::All => builder.status(apca_datav2::orders::SearchOrderStatus::All),
+    OrderStatus::Open => builder.status(apca_datav2::orders::SearchOrderStatus::Open),
+    OrderStatus::Closed => builder.status(apca_datav2::orders::SearchOrderStatus::Closed),
+  };
+
+  let list_req = builder.build()?;
 
   let list = client.list_orders(&list_req).await?;
   for order in list {
-    println!("{} -- {:?} -- {:<8} -- {:>3} ({:>3}) -- {:?}", order.id, order.created_at, order.symbol, order.qty.unwrap_or(0.0), order.filled_qty, order.status);
+    println!("{} -- {:?} -- {:<8} -- {:>3}/{:>3} ({:>11.3} $) -- {:?}", 
+    order.id, order.created_at, order.symbol, 
+    order.filled_qty, order.qty.unwrap_or(0.0), 
+    order.filled_avg_price.map(|p| order.filled_qty * p).unwrap_or(0.0),
+    order.status);
   }
   
   Ok(())

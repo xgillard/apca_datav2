@@ -29,6 +29,9 @@ pub enum Error {
     SubscriptionDataBuilder(#[from] SubscriptionDataBuilderError),
     #[error("http error {0}")]
     HttpError(#[from] reqwest::Error),
+    /// Should never occur
+    #[error("BUG: Unecpected http status")]
+    Unexpected,
 }
 
 /*******************************************************************************
@@ -153,6 +156,19 @@ pub(crate) fn maybe_convert_to_hist_error(e: reqwest::Error) -> Error {
         Error::HttpError(e)
     }
 }
+pub(crate) async fn status_code_to_hist_error<T>(rsp: Response) -> Result<T, Error> 
+    where T: for<'de> Deserialize<'de>
+{
+    match rsp.status().as_u16() {
+        200 => Ok(rsp.json::<T>().await?),
+        400 => Err(Error::History(HistoryError::BadRequest)),
+        403 => Err(Error::History(HistoryError::Forbidden)),
+        404 => Err(Error::History(HistoryError::NotFound)),
+        422 => Err(Error::History(HistoryError::Unprocessable)),
+        429 => Err(Error::History(HistoryError::TooManyRequests)),
+        _   => Err(Error::Unexpected)
+    }
+}
 
 /*******************************************************************************
  * ORDER API SPECIFIC STUFFS
@@ -178,11 +194,7 @@ pub enum OrderError {
     /// Failed to cancel order
     #[error("Failed to cancel order")]
     #[serde(rename="500")]
-    InternalServerError,
-
-    /// Should never occur
-    #[error("Unecpected http status")]
-    UnexpectedHttpStatus,
+    InternalError,
 }
 
 /// Attempts to convert an HTTP error into an order error. 
@@ -194,7 +206,7 @@ pub(crate) fn maybe_convert_to_order_error(e: reqwest::Error) -> Error {
             403 => Error::Order(OrderError::Forbidden),
             404 => Error::Order(OrderError::NotFound),
             422 => Error::Order(OrderError::Unprocessable),
-            500 => Error::Order(OrderError::InternalServerError),
+            500 => Error::Order(OrderError::InternalError),
             _   => Error::HttpError(e)
         }
     } else {
@@ -209,7 +221,7 @@ pub(crate) async fn status_code_to_order_error<T>(rsp: Response) -> Result<T, Er
         403 => Err(Error::Order(OrderError::Forbidden)),
         404 => Err(Error::Order(OrderError::NotFound)),
         422 => Err(Error::Order(OrderError::Unprocessable)),
-        500 => Err(Error::Order(OrderError::InternalServerError)),
-        _   => Err(Error::Order(OrderError::UnexpectedHttpStatus)),
+        500 => Err(Error::Order(OrderError::InternalError)),
+        _   => Err(Error::Unexpected),
     }
 }

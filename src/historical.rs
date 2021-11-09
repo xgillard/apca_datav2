@@ -53,7 +53,7 @@ use futures::{Future, FutureExt, Stream};
 use itertools::Itertools;
 use reqwest::RequestBuilder;
 
-use crate::{data::{AuthData, BarData, MultiBars, MultiQuotes, MultiTrades, QuoteData, SingleQuote, SingleSnapshot, SingleTrade, SnapshotData, TimeFrame, TradeData}, errors::{Error, maybe_convert_to_hist_error}};
+use crate::{data::{AuthData, BarData, MultiBars, MultiQuotes, MultiTrades, QuoteData, SingleQuote, SingleSnapshot, SingleTrade, SnapshotData, TimeFrame, TradeData}, errors::{Error, maybe_convert_to_hist_error, status_code_to_hist_error}};
 
 /// Base URL to access historical data
 pub const BASE_URL: &str = "https://data.alpaca.markets/v2";
@@ -137,18 +137,18 @@ impl Client {
         let rsp = self.get_authenticated(&url)
                 .query(&query)
                 .send().await
-                .map_err(maybe_convert_to_hist_error)?
-                .json::<MultiTrades>().await?;
-        Ok(rsp)
+                .map_err(maybe_convert_to_hist_error)?;
+
+        status_code_to_hist_error(rsp).await
     }
     /// This endpoint returns latest trade for the requested security.
     pub async fn latest_trade(&self, symbol: &str) -> Result<SingleTrade, Error> {
         let url = format!("https://data.alpaca.markets/v2/stocks/{symbol}/trades/latest", symbol=symbol);
         let rsp = self.get_authenticated(&url)
                 .send().await
-                .map_err(maybe_convert_to_hist_error)?
-                .json::<SingleTrade>().await?;
-        Ok(rsp)
+                .map_err(maybe_convert_to_hist_error)?;
+
+        status_code_to_hist_error(rsp).await
     }
     /// This endpoint returns quote (NBBO) historical data for the requested security.
     pub async fn quotes_paged(&self, symbol: &str, start: DateTime<Utc>, end: DateTime<Utc>, limit: Option<usize>, page_token: Option<String>) -> Result<MultiQuotes, Error> {
@@ -166,18 +166,18 @@ impl Client {
         let rsp   = self.get_authenticated(&url)
                 .query(&query)
                 .send().await
-                .map_err(maybe_convert_to_hist_error)?
-                .json::<MultiQuotes>().await?;
-        Ok(rsp)
+                .map_err(maybe_convert_to_hist_error)?;
+
+        status_code_to_hist_error(rsp).await
     }
     /// This endpoint returns latest quote for the requested security.
     pub async fn latest_quote(&self, symbol: &str) -> Result<SingleQuote, Error> {
         let url = format!("https://data.alpaca.markets/v2/stocks/{symbol}/quotes/latest", symbol=symbol);
         let rsp = self.get_authenticated(&url)
                 .send().await
-                .map_err(maybe_convert_to_hist_error)?
-                .json::<SingleQuote>().await?;
-        Ok(rsp)
+                .map_err(maybe_convert_to_hist_error)?;
+
+        status_code_to_hist_error(rsp).await
     }
     /// This endpoint returns aggregate historical data for the requested security.
     pub async fn bars_paged(&self, symbol: &str, start: DateTime<Utc>, end: DateTime<Utc>, timeframe: TimeFrame ,limit: Option<usize>, page_token: Option<String>) -> Result<MultiBars, Error> {
@@ -196,9 +196,9 @@ impl Client {
         let rsp   = self.get_authenticated(&url)
                 .query(&query)
                 .send().await
-                .map_err(maybe_convert_to_hist_error)?
-                .json::<MultiBars>().await?;
-        Ok(rsp)
+                .map_err(maybe_convert_to_hist_error)?;
+
+        status_code_to_hist_error(rsp).await
     }
     /// The Snapshot API for one ticker provides the latest trade, latest quote, 
     /// minute bar daily bar and previous daily bar data for a given ticker symbol.
@@ -206,9 +206,9 @@ impl Client {
         let url = format!("https://data.alpaca.markets/v2/stocks/{symbol}/snapshot", symbol=symbol);
         let rsp = self.get_authenticated(&url)
             .send().await
-            .map_err(maybe_convert_to_hist_error)?
-            .json::<SingleSnapshot>().await?;
-        Ok(rsp)
+            .map_err(maybe_convert_to_hist_error)?;
+
+        status_code_to_hist_error(rsp).await
     }
     /// The Snapshot API for multiple tickers provides the latest trade, 
     /// latest quote, minute bar daily bar and previous daily bar data for 
@@ -218,9 +218,9 @@ impl Client {
         let rsp = self.get_authenticated(url)
             .query(&[("symbols", symbols)])
             .send().await
-            .map_err(maybe_convert_to_hist_error)?
-            .json::<HashMap<String, SnapshotData>>().await?;
-        Ok(rsp)
+            .map_err(maybe_convert_to_hist_error)?;
+
+        status_code_to_hist_error(rsp).await
     }
     /// The Snapshot API for multiple tickers provides the latest trade, 
     /// latest quote, minute bar daily bar and previous daily bar data for 
@@ -231,9 +231,9 @@ impl Client {
         let rsp = self.get_authenticated(url)
             .query(&[("symbols", symbols)])
             .send().await
-            .map_err(maybe_convert_to_hist_error)?
-            .json::<HashMap<String, SnapshotData>>().await?;
-        Ok(rsp)
+            .map_err(maybe_convert_to_hist_error)?;
+
+        status_code_to_hist_error(rsp).await
     }
 }
 

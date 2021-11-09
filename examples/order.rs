@@ -1,4 +1,4 @@
-use apca_datav2::{data::{AuthDataBuilder, OrderSide}, orders::{Client, ListOrderRequestBuilder, PlaceOrderRequestBuilder}};
+use apca_datav2::{data::{AuthDataBuilder, OrderSide}, orders::{ListOrderRequestBuilder, PlaceOrderRequestBuilder}, rest::Client};
 use dotenv_codegen::dotenv;
 use anyhow::Result;
 use structopt::StructOpt;

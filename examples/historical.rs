@@ -1,4 +1,4 @@
-use apca_datav2::{data::AuthDataBuilder, historical::Client};
+use apca_datav2::{data::AuthDataBuilder, rest::Client};
 use dotenv_codegen::dotenv;
 use anyhow::Result;
 use structopt::StructOpt;
@@ -16,7 +16,7 @@ async fn main() -> Result<()> {
       .secret(dotenv!("APCA_SECRET").to_string())
       .build()?;
 
-    let client = Client::new(auth);
+    let client = Client::paper(auth);
     let snap   = client.snapshot(&args.symbol).await?;
     println!("{:#?}", snap);
 

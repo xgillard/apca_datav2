@@ -18,68 +18,20 @@
 //! Please note that body parameters should be passed using a JSON encoded body.
 
 use chrono::{DateTime, Utc};
-use reqwest::RequestBuilder;
 use serde::{Deserialize, Serialize};
 use derive_builder::Builder;
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
-use crate::{data::{AuthData, Direction, Order, OrderClass, OrderSide, OrderType, TimeInForce}, errors::{Error, OrderError, maybe_convert_to_order_error, status_code_to_order_error}};
-
-
-/// Base URL to interact with live trading api
-pub const LIVE_TRADING_URL: &str = "https://api.alpaca.markets";
-/// Base URL to interact with paper trading api
-pub const PAPER_TRADING_URL: &str = "https://paper-api.alpaca.markets";
+use crate::{data::{Direction, Order, OrderClass, OrderSide, OrderType, TimeInForce}, errors::{Error, OrderError, maybe_convert_to_order_error, status_code_to_order_error}, rest::Client};
 
 /// Path to the orders endpoint (used to list and place orders)
 pub const ORDERS: &str = "v2/orders";
 
-/// Header used to send the key-id authentication
-pub const APCA_API_KEY_ID: &str = "APCA-API-KEY-ID";
-/// Header used to send the secret-key for authentication
-pub const APCA_API_SECRET_KEY: &str = "APCA-API-SECRET-KEY";
-
-pub struct Client {
-  auth:   AuthData,
-  client: reqwest::Client,
-  base_url: &'static str,
-}
 impl Client {
-  pub fn live(auth: AuthData) -> Self {
-    Self::new(auth, true)
-  }
-  pub fn paper(auth: AuthData) -> Self {
-    Self::new(auth, false)
-  }
-  pub fn new(auth: AuthData, live: bool) -> Self {
-    let base_url = if live { LIVE_TRADING_URL } else { PAPER_TRADING_URL };
-    Self {auth, client: reqwest::Client::new(), base_url}
-  }
-  fn get_authenticated(&self, url: &str) -> RequestBuilder {
-      self.client.get(url)
-          .header(APCA_API_KEY_ID,     &self.auth.key)
-          .header(APCA_API_SECRET_KEY, &self.auth.secret)        
-  }
-  fn post_authenticated(&self, url: &str) -> RequestBuilder {
-    self.client.post(url)
-        .header(APCA_API_KEY_ID,     &self.auth.key)
-        .header(APCA_API_SECRET_KEY, &self.auth.secret)        
-  }
-  fn patch_authenticated(&self, url: &str) -> RequestBuilder {
-      self.client.patch(url)
-          .header(APCA_API_KEY_ID,     &self.auth.key)
-          .header(APCA_API_SECRET_KEY, &self.auth.secret)        
-  }
-  fn delete_authenticated(&self, url: &str) -> RequestBuilder {
-      self.client.delete(url)
-          .header(APCA_API_KEY_ID,     &self.auth.key)
-          .header(APCA_API_SECRET_KEY, &self.auth.secret)        
-  }
-
   /// Retrieves a list of orders for the account, filtered by the supplied 
   /// query parameters.
   pub async fn list_orders(&self, request: &ListOrderRequest) -> Result<Vec<Order>, Error> {
-    let url = format!("{}/{}", self.base_url, ORDERS);
+    let url = format!("{}/{}", self.env_url(), ORDERS);
     let rsp = self.get_authenticated(&url)
       .query(request)
       .send().await
@@ -91,7 +43,7 @@ impl Client {
   /// rejected if the account is not authorized for trading, or if the tradable
   /// balance is insufficient to fill the order.
   pub async fn place_order(&self, request: &PlaceOrderRequest) -> Result<Order, Error> {
-    let url = format!("{}/{}", self.base_url, ORDERS);
+    let url = format!("{}/{}", self.env_url(), ORDERS);
     let rsp = self.post_authenticated(&url)
       .json(request)
       .send().await
@@ -106,7 +58,7 @@ impl Client {
   /// - nested: If true, the result will roll up multi-leg orders under the 
   ///     legs field of primary order.
   pub async fn get_by_id(&self, id: &str, nested: bool) -> Result<Order, Error> {
-    let url = format!("{}/{}/{}", self.base_url, ORDERS, id);
+    let url = format!("{}/{}/{}", self.env_url(), ORDERS, id);
     let rsp = self.get_authenticated(&url)
       .query(&("nested", nested))
       .send().await
@@ -119,7 +71,7 @@ impl Client {
   /// ## Parameters
   /// - id: the client order-id
   pub async fn get_by_client_id(&self, id: &str) -> Result<Order, Error> {
-    let url = format!("{}/{}:by_client_order_id", self.base_url, ORDERS);
+    let url = format!("{}/{}:by_client_order_id", self.env_url(), ORDERS);
     let rsp = self.get_authenticated(&url)
       .query(&("client_order_id", id))
       .send().await
@@ -145,7 +97,7 @@ impl Client {
   /// it with a lower limit price, the buying power is calculated based on the 
   /// old order.
   pub async fn replace(&self, id: &str, replacement: &ReplacementRequest) -> Result<Order, Error> {
-    let url = format!("{}/{}/{}", self.base_url, ORDERS, id);
+    let url = format!("{}/{}/{}", self.env_url(), ORDERS, id);
     let rsp = self.patch_authenticated(&url)
       .json(replacement)
       .send().await
@@ -161,7 +113,7 @@ impl Client {
   /// HTTP 207 Multi-Status with body; an array of objects that include the 
   /// order id and http status code for each status request.
   pub async fn cancel_all_orders(&self) -> Result<Vec<CancellationData>, Error> {
-    let url = format!("{}/{}", self.base_url, ORDERS);
+    let url = format!("{}/{}", self.env_url(), ORDERS);
     let rsp = self.delete_authenticated(&url)
       .send().await
       .map_err(maybe_convert_to_order_error)?;
@@ -173,7 +125,7 @@ impl Client {
   /// reject the request. Upon acceptance of the cancel request, it returns 
   /// status 204.
   pub async fn cancel_by_id(&self, id: &str) -> Result<CancelationStatus, Error> {
-    let url = format!("{}/{}/{}", self.base_url, ORDERS, id);
+    let url = format!("{}/{}/{}", self.env_url(), ORDERS, id);
     let rsp = self.delete_authenticated(&url)
       .send().await
       .map_err(maybe_convert_to_order_error)?;

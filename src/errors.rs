@@ -30,8 +30,8 @@ pub enum Error {
     #[error("http error {0}")]
     HttpError(#[from] reqwest::Error),
     /// Should never occur
-    #[error("BUG: Unecpected http status")]
-    Unexpected,
+    #[error("BUG: Unexpected http status ({0})")]
+    Unexpected(u16),
 }
 
 /*******************************************************************************
@@ -166,7 +166,7 @@ pub(crate) async fn status_code_to_hist_error<T>(rsp: Response) -> Result<T, Err
         404 => Err(Error::History(HistoryError::NotFound)),
         422 => Err(Error::History(HistoryError::Unprocessable)),
         429 => Err(Error::History(HistoryError::TooManyRequests)),
-        _   => Err(Error::Unexpected)
+        s   => Err(Error::Unexpected(s))
     }
 }
 
@@ -218,10 +218,12 @@ pub(crate) async fn status_code_to_order_error<T>(rsp: Response) -> Result<T, Er
 {
     match rsp.status().as_u16() {
         200 => Ok(rsp.json::<T>().await?),
+        204 => Ok(rsp.json::<T>().await?),
+        207 => Ok(rsp.json::<T>().await?),
         403 => Err(Error::Order(OrderError::Forbidden)),
         404 => Err(Error::Order(OrderError::NotFound)),
         422 => Err(Error::Order(OrderError::Unprocessable)),
         500 => Err(Error::Order(OrderError::InternalError)),
-        _   => Err(Error::Unexpected),
+        s   => Err(Error::Unexpected(s)),
     }
 }

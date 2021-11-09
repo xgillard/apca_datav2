@@ -24,7 +24,7 @@ async fn main() -> Result<()> {
     //
     client.subscribe(
         SubscriptionDataBuilder::default()
-            .trades(args.symbols)
+            .quotes(args.symbols)
             .build()?
     ).await?;
     
@@ -33,8 +33,11 @@ async fn main() -> Result<()> {
         match r {
             Response::Error(e) => println!("ERROR {:?}", e),
             Response::Trade(t) => println!("Trade {:?}", t),
-            Response::Quote(q) => println!("Quote {:?}", q),
             Response::Bar(b)   => println!("Bar   {:?}", b),
+            Response::Quote(q) => 
+                println!("{} -- bid: {:>5.3} ({:>5}) -- ask: {:>5.3} ({:>5})", 
+                    q.symbol, q.data.bid_price, q.data.bid_size, 
+                        q.data.ask_price, q.data.ask_size),
             _ => /* ignore */(),
             //Response::Success{message: s} =>  println!("SUCCESS {:?}", s),
             //Response::Subscription(s) => println!("SUBSCRIPTIONS {:?}", s)

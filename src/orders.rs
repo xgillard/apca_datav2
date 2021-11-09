@@ -21,8 +21,9 @@ use chrono::{DateTime, Utc};
 use reqwest::RequestBuilder;
 use serde::{Deserialize, Serialize};
 use derive_builder::Builder;
+use serde_repr::{Deserialize_repr, Serialize_repr};
 
-use crate::{data::{AuthData, Direction, Order, OrderClass, OrderSide, OrderType, TimeInForce}, errors::{Error, maybe_convert_to_order_error, status_code_to_order_error}};
+use crate::{data::{AuthData, Direction, Order, OrderClass, OrderSide, OrderType, TimeInForce}, errors::{Error, OrderError, maybe_convert_to_order_error, status_code_to_order_error}};
 
 
 /// Base URL to interact with live trading api
@@ -54,7 +55,6 @@ impl Client {
     let base_url = if live { LIVE_TRADING_URL } else { PAPER_TRADING_URL };
     Self {auth, client: reqwest::Client::new(), base_url}
   }
-  #[allow(dead_code)]
   fn get_authenticated(&self, url: &str) -> RequestBuilder {
       self.client.get(url)
           .header(APCA_API_KEY_ID,     &self.auth.key)
@@ -64,6 +64,16 @@ impl Client {
     self.client.post(url)
         .header(APCA_API_KEY_ID,     &self.auth.key)
         .header(APCA_API_SECRET_KEY, &self.auth.secret)        
+  }
+  fn patch_authenticated(&self, url: &str) -> RequestBuilder {
+      self.client.patch(url)
+          .header(APCA_API_KEY_ID,     &self.auth.key)
+          .header(APCA_API_SECRET_KEY, &self.auth.secret)        
+  }
+  fn delete_authenticated(&self, url: &str) -> RequestBuilder {
+      self.client.delete(url)
+          .header(APCA_API_KEY_ID,     &self.auth.key)
+          .header(APCA_API_SECRET_KEY, &self.auth.secret)        
   }
 
   /// Retrieves a list of orders for the account, filtered by the supplied 
@@ -88,6 +98,96 @@ impl Client {
       .map_err(maybe_convert_to_order_error)?;
     status_code_to_order_error(rsp).await
   }
+
+  /// Retrieves a single order for the given order_id. 
+  /// 
+  /// ## Parameters
+  /// - id: the order uuid
+  /// - nested: If true, the result will roll up multi-leg orders under the 
+  ///     legs field of primary order.
+  pub async fn get_by_id(&self, id: &str, nested: bool) -> Result<Order, Error> {
+    let url = format!("{}/{}/{}", self.base_url, ORDERS, id);
+    let rsp = self.get_authenticated(&url)
+      .query(&("nested", nested))
+      .send().await
+      .map_err(maybe_convert_to_order_error)?;
+    status_code_to_order_error(rsp).await
+  } 
+
+  ///  Retrieves a single order for the given client_order_id. . 
+  /// 
+  /// ## Parameters
+  /// - id: the client order-id
+  pub async fn get_by_client_id(&self, id: &str) -> Result<Order, Error> {
+    let url = format!("{}/{}:by_client_order_id", self.base_url, ORDERS);
+    let rsp = self.get_authenticated(&url)
+      .query(&("client_order_id", id))
+      .send().await
+      .map_err(maybe_convert_to_order_error)?;
+    status_code_to_order_error(rsp).await
+  } 
+
+  /// Replaces a single order with updated parameters. Each parameter overrides 
+  /// the corresponding attribute of the existing order. The other attributes 
+  /// remain the same as the existing order.
+  /// A success return code from a replaced order does NOT guarantee the 
+  /// existing open order has been replaced. If the existing open order is 
+  /// filled before the replacing (new) order reaches the execution venue, the 
+  /// replacing (new) order is rejected, and these events are sent in the 
+  /// trade_updates stream channel. Read more about the trade stream updates 
+  /// ![](https://docs.alpaca.markets/api-documentation/api-v2/streaming/#order-updates "here").
+  /// 
+  /// While an order is being replaced, buying power is reduced by the larger 
+  /// of the two orders that have been placed (the old order being replaced, 
+  /// and the newly placed order to replace it). If you are replacing a buy 
+  /// entry order with a higher limit price than the original order, the buying 
+  /// power is calculated based on the newly placed order. If you are replacing 
+  /// it with a lower limit price, the buying power is calculated based on the 
+  /// old order.
+  pub async fn replace(&self, id: &str, replacement: &ReplacementRequest) -> Result<Order, Error> {
+    let url = format!("{}/{}/{}", self.base_url, ORDERS, id);
+    let rsp = self.patch_authenticated(&url)
+      .json(replacement)
+      .send().await
+      .map_err(maybe_convert_to_order_error)?;
+    status_code_to_order_error(rsp).await
+  } 
+
+  /// Attempts to cancel all open orders. A response will be provided for 
+  /// each order that is attempted to be cancelled. If an order is no longer 
+  /// cancelable, the server will respond with status 500 and reject the request.
+  /// 
+  /// Response
+  /// HTTP 207 Multi-Status with body; an array of objects that include the 
+  /// order id and http status code for each status request.
+  pub async fn cancel_all_orders(&self) -> Result<Vec<CancellationData>, Error> {
+    let url = format!("{}/{}", self.base_url, ORDERS);
+    let rsp = self.delete_authenticated(&url)
+      .send().await
+      .map_err(maybe_convert_to_order_error)?;
+    status_code_to_order_error(rsp).await
+  }
+
+  /// Attempts to cancel an open order. If the order is no longer cancelable (
+  /// example: status="filled"), the server will respond with status 422, and 
+  /// reject the request. Upon acceptance of the cancel request, it returns 
+  /// status 204.
+  pub async fn cancel_by_id(&self, id: &str) -> Result<CancelationStatus, Error> {
+    let url = format!("{}/{}/{}", self.base_url, ORDERS, id);
+    let rsp = self.delete_authenticated(&url)
+      .send().await
+      .map_err(maybe_convert_to_order_error)?;
+
+    match rsp.status().as_u16() {
+      200 => Ok(CancelationStatus::Success),
+      204 => Ok(CancelationStatus::NoContent),
+      403 => Err(Error::Order(OrderError::Forbidden)),
+      404 => Err(Error::Order(OrderError::NotFound)),
+      422 => Err(Error::Order(OrderError::Unprocessable)),
+      500 => Err(Error::Order(OrderError::InternalError)),
+      s   => Err(Error::Unexpected(s))
+    }
+  }
 }
 
 /// Status when searching for a given order
@@ -100,7 +200,6 @@ pub enum SearchOrderStatus {
   #[serde(rename="all")]
   All,
 }
-
 
 /// List Order Requests
 #[derive(Builder, Debug, Clone, Serialize, Deserialize)]
@@ -203,4 +302,71 @@ pub struct StopLoss {
   pub stop_price: f64,
   /// the stop-loss order becomes a stop-limit order if specified
   pub limit_price: f64,
+}
+/// Replace Order Requests
+/// 
+/// Replaces a single order with updated parameters. Each parameter overrides 
+/// the corresponding attribute of the existing order. The other attributes 
+/// remain the same as the existing order.
+/// A success return code from a replaced order does NOT guarantee the 
+/// existing open order has been replaced. If the existing open order is 
+/// filled before the replacing (new) order reaches the execution venue, the 
+/// replacing (new) order is rejected, and these events are sent in the 
+/// trade_updates stream channel. Read more about the trade stream updates 
+/// ![](https://docs.alpaca.markets/api-documentation/api-v2/streaming/#order-updates "here").
+/// 
+/// While an order is being replaced, buying power is reduced by the larger 
+/// of the two orders that have been placed (the old order being replaced, 
+/// and the newly placed order to replace it). If you are replacing a buy 
+/// entry order with a higher limit price than the original order, the buying 
+/// power is calculated based on the newly placed order. If you are replacing 
+/// it with a lower limit price, the buying power is calculated based on the 
+/// old order.
+/// 
+/// Note: A replacement request is not tied to any specific order. It can thus
+/// be reused multiple times without needing a mutable access to the replacement
+/// request.
+/// 
+#[derive(Builder, Debug, Clone, Serialize, Deserialize)]
+pub struct ReplacementRequest {
+  /// number of shares to trade
+  /// 
+  /// FIXME: (in the docs)
+  /// Does it make sense that this parameter be an integer rather than a plain
+  /// floating point number ?
+  pub qty: Option<u32>,
+  /// day, gtc, opg, cls, ioc, fok. 
+  pub time_in_force: Option<TimeInForce>,
+  /// required if type is limit or stop_limit
+  pub limit_price: Option<f64>,
+  /// required if type is stop or stop_limit
+  pub stop_price: Option<f64>,
+  /// the new value of the trail_price or trail_percent value 
+  /// (works only for type="trailing_stop”)
+  pub trail: Option<f64>,
+  /// A unique identifier for the order. Automatically generated if not sent.
+  pub client_order_id: Option<String>
+}
+
+/// A notification wrt the status of a cancelation request
+#[derive(Builder, Debug, Clone, Serialize, Deserialize)]
+pub struct CancellationData {
+  /// The order whose cancelation has been requested.
+  pub id: String,
+  /// The cancelation status
+  pub status: CancelationStatus 
+}
+/// Basically an http status code which is interpreted in the context of an 
+/// order cancelation request
+#[derive(Debug, Clone, Serialize_repr, Deserialize_repr)]
+ #[repr(u16)]
+pub enum CancelationStatus {
+  /// Cancelation succeeded
+  Success = 200,
+  /// The request has been sucessfully processed but there is no reply info.
+  NoContent = 204,
+  /// The order was not found
+  NotFound = 404,
+  /// The order cannot be canceled
+  Unprocessable = 422
 }

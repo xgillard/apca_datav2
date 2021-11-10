@@ -4,6 +4,7 @@
 extern crate serde;
 use chrono::{DateTime, Utc};
 use serde::{Serialize, Deserialize};
+use serde_repr::{Deserialize_repr, Serialize_repr};
 
 /******************************************************************************
  * DATA POINTS ****************************************************************
@@ -186,6 +187,9 @@ use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum OrderClass {
+    /// Class of the orders that are generated when closing a position
+    #[serde(rename="")]
+    Closure,
     #[serde(rename="simple")]
     Simple,
     #[serde(rename="bracket")]
@@ -534,13 +538,122 @@ pub struct OrderData {
     pub hwm: Option<f64>,
 }
 
+/// A notification wrt the status of a cancelation request
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CancellationData {
+  /// The order whose cancelation has been requested.
+  pub id: String,
+  /// The cancelation status
+  pub status: CancelationStatus 
+}
+/// Basically an http status code which is interpreted in the context of an 
+/// order cancelation request
+#[derive(Debug, Clone, Serialize_repr, Deserialize_repr)]
+ #[repr(u16)]
+pub enum CancelationStatus {
+  /// Cancelation succeeded
+  Success = 200,
+  /// The request has been sucessfully processed but there is no reply info.
+  NoContent = 204,
+  /// The order was not found
+  NotFound = 404,
+  /// The order cannot be canceled
+  Unprocessable = 422
+}
+
+/// The side of a position (is it a long position or a short one ?)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PositionSide {
+    /// This is a long position (bought security before selling)
+    #[serde(rename="long")]
+    Long, 
+    /// This is a short position (sold security before buying)
+    #[serde(rename="short")]
+    Short
+}
+
+/// The description of a position
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PositionData {
+    /// Asset ID
+    pub asset_id: String,
+    /// Symbol name of the asset
+    pub symbol: String,
+    /// Exchange name of the asset (ErisX for crypto)
+    pub exchange: String,
+    /// Asset class name
+    pub asset_class: String,
+    /// Average entry price of the position
+    #[serde(deserialize_with="crate::utils::number_as_f64")]
+    pub avg_entry_price: f64,
+    /// The number of shares
+    #[serde(deserialize_with="crate::utils::number_as_f64")]
+    pub qty: f64,
+    /// Is it a short or a long position ?
+    pub side: PositionSide,
+    /// Total dollar amount of the position
+    #[serde(deserialize_with="crate::utils::number_as_f64")]
+    pub market_value: f64,
+    /// Total cost basis in dollar
+    #[serde(deserialize_with="crate::utils::number_as_f64")]
+    pub cost_basis: f64,
+    /// Unrealized profit/loss in dollars
+    #[serde(deserialize_with="crate::utils::number_as_f64")]
+    pub unrealized_pl: f64,
+    /// Unrealized profit/loss percent (by a factor of 1)
+    #[serde(deserialize_with="crate::utils::number_as_f64")]
+    pub unrealized_plpc: f64,
+    /// Unrealized profit/loss in dollars for the day
+    #[serde(deserialize_with="crate::utils::number_as_f64")]
+    pub unrealized_intraday_pl: f64,
+    /// Unrealized profit/loss percent (by a factor of 1)
+    #[serde(deserialize_with="crate::utils::number_as_f64")]
+    pub unrealized_intraday_plpc: f64,
+    /// Current asset price per share
+    #[serde(deserialize_with="crate::utils::number_as_f64")]
+    pub current_price: f64,
+    /// Last day’s asset price per share based on the closing value of the 
+    /// last trading day
+    #[serde(deserialize_with="crate::utils::number_as_f64")]
+    pub lastday_price: f64,
+    /// Percent change from last day price (by a factor of 1)
+    #[serde(deserialize_with="crate::utils::number_as_f64")]
+    pub change_today: f64
+}
+
+/// A notification wrt the status of a position closure
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClosureData {
+  /// The symbol whose position is being closed
+  pub symbol: String,
+  /// The closure status
+  pub status: ClosureStatus 
+}
+/// Basically an http status code which is interpreted in the context of an 
+/// position closure
+#[derive(Debug, Clone, Serialize_repr, Deserialize_repr)]
+ #[repr(u16)]
+pub enum ClosureStatus {
+  /// Position closure succeeded
+  Success = 200,
+  /// The request has been sucessfully processed but there is no reply info.
+  NoContent = 204,
+  /// The action is forbidden
+  Forbidden = 403,
+  /// The position was not found
+  NotFound = 404,
+  /// The position cannot be closed
+  Unprocessable = 422
+}
+
+
 /******************************************************************************
  * TESTS **********************************************************************
  ******************************************************************************/
 
 #[cfg(test)]
 mod tests {
-   use crate::entities::OrderData;
+   use crate::entities::{OrderData, PositionData};
 
    #[test]
    fn test_deserialize_order() {
@@ -579,6 +692,31 @@ mod tests {
             "hwm":null
         }"#;
       let deserialized = serde_json::from_str::<OrderData>(txt);
+      println!("{:?}", deserialized);
+      assert!(deserialized.is_ok());
+   }
+
+   #[test]
+   pub fn test_deserialize_position() {
+      let txt = r#"{
+        "asset_id": "904837e3-3b76-47ec-b432-046db621571b",
+        "symbol": "AAPL ",
+        "exchange": "NASDAQ",
+        "asset_class": "us_equity",
+        "avg_entry_price": "100.0",
+        "qty": "5",
+        "side": "long",
+        "market_value": "600.0",
+        "cost_basis": "500.0",
+        "unrealized_pl": "100.0",
+        "unrealized_plpc": "0.20",
+        "unrealized_intraday_pl": "10.0",
+        "unrealized_intraday_plpc": "0.0084",
+        "current_price": "120.0",
+        "lastday_price": "119.0",
+        "change_today": "0.0084"
+      }"#;
+      let deserialized = serde_json::from_str::<PositionData>(txt);
       println!("{:?}", deserialized);
       assert!(deserialized.is_ok());
    }

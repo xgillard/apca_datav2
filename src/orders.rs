@@ -20,9 +20,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use derive_builder::Builder;
-use serde_repr::{Deserialize_repr, Serialize_repr};
 
-use crate::{entities::{Direction, OrderData, OrderClass, OrderSide, OrderType, TimeInForce}, errors::{Error, OrderError, maybe_convert_to_order_error, status_code_to_order_error}, rest::Client};
+use crate::{entities::{CancelationStatus, CancellationData, Direction, OrderClass, OrderData, OrderSide, OrderType, TimeInForce}, errors::{Error, OrderError, maybe_convert_to_order_error, status_code_to_order_error}, rest::Client};
 
 /// Path to the orders endpoint (used to list and place orders)
 pub const ORDERS: &str = "v2/orders";
@@ -60,7 +59,7 @@ impl Client {
   pub async fn get_by_id(&self, id: &str, nested: bool) -> Result<OrderData, Error> {
     let url = format!("{}/{}/{}", self.env_url(), ORDERS, id);
     let rsp = self.get_authenticated(&url)
-      .query(&("nested", nested))
+      .query(&[("nested", nested)])
       .send().await
       .map_err(maybe_convert_to_order_error)?;
     status_code_to_order_error(rsp).await
@@ -73,7 +72,7 @@ impl Client {
   pub async fn get_by_client_id(&self, id: &str) -> Result<OrderData, Error> {
     let url = format!("{}/{}:by_client_order_id", self.env_url(), ORDERS);
     let rsp = self.get_authenticated(&url)
-      .query(&("client_order_id", id))
+      .query(&[("client_order_id", id)])
       .send().await
       .map_err(maybe_convert_to_order_error)?;
     status_code_to_order_error(rsp).await
@@ -298,27 +297,4 @@ pub struct ReplacementRequest {
   pub trail: Option<f64>,
   /// A unique identifier for the order. Automatically generated if not sent.
   pub client_order_id: Option<String>
-}
-
-/// A notification wrt the status of a cancelation request
-#[derive(Builder, Debug, Clone, Serialize, Deserialize)]
-pub struct CancellationData {
-  /// The order whose cancelation has been requested.
-  pub id: String,
-  /// The cancelation status
-  pub status: CancelationStatus 
-}
-/// Basically an http status code which is interpreted in the context of an 
-/// order cancelation request
-#[derive(Debug, Clone, Serialize_repr, Deserialize_repr)]
- #[repr(u16)]
-pub enum CancelationStatus {
-  /// Cancelation succeeded
-  Success = 200,
-  /// The request has been sucessfully processed but there is no reply info.
-  NoContent = 204,
-  /// The order was not found
-  NotFound = 404,
-  /// The order cannot be canceled
-  Unprocessable = 422
 }

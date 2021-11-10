@@ -21,6 +21,8 @@ pub enum Error {
     History(#[from] HistoryError),
     #[error("error with Alpaca's order API {0}")]
     Order(#[from] OrderError),
+    #[error("error with Alpaca's position API {0}")]
+    Position(#[from] PositionError),
     #[error("error in the conversion from/to JSON")]
     Json(#[from] serde_json::Error),
     #[error("BUG: {0}")]
@@ -226,4 +228,57 @@ pub(crate) async fn status_code_to_order_error<T>(rsp: Response) -> Result<T, Er
         500 => Err(Error::Order(OrderError::InternalError)),
         s   => Err(Error::Unexpected(s)),
     }
+}
+
+
+/*******************************************************************************
+ * POSITIONS API SPECIFIC STUFFS
+ ******************************************************************************/
+
+/// Basically, Alpaca has reused the standard meaning of HTTP statuses but
+/// this error type adds some 'business' information on top of it
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize_repr, Deserialize_repr, thiserror::Error)]
+#[repr(u16)]
+pub enum PositionError {
+   /// Impossible to close position
+   #[error("Action forbidden")]
+   #[serde(rename="403")]
+   Forbidden = 403,
+   /// Position is not found
+   #[error("Position is not found")]
+   #[serde(rename="404")]
+   NotFound = 404,
+   /// Failed to liquidate position
+   #[error("Failed to liquidate")]
+   #[serde(rename="500")]
+   InternalError,
+}
+
+/// Attempts to convert an HTTP error into a position error. 
+/// Basically, Alpaca has reused the standard meaning of HTTP statuses but
+/// this error type adds some 'business' information on top of it
+pub(crate) fn maybe_convert_to_position_error(e: reqwest::Error) -> Error {
+   if let Some(status) = e.status() {
+       match status.as_u16() {
+           403 => Error::Position(PositionError::Forbidden),
+           404 => Error::Position(PositionError::NotFound),
+           500 => Error::Position(PositionError::InternalError),
+           _   => Error::HttpError(e)
+       }
+   } else {
+       Error::HttpError(e)
+   }
+}
+pub(crate) async fn status_code_to_position_error<T>(rsp: Response) -> Result<T, Error> 
+   where T: for<'de> Deserialize<'de>
+{
+   match rsp.status().as_u16() {
+       200 => Ok(rsp.json::<T>().await?),
+       204 => Ok(rsp.json::<T>().await?),
+       207 => Ok(rsp.json::<T>().await?),
+       403 => Err(Error::Position(PositionError::Forbidden)),
+       404 => Err(Error::Position(PositionError::NotFound)),
+       500 => Err(Error::Position(PositionError::InternalError)),
+       s   => Err(Error::Unexpected(s)),
+   }
 }

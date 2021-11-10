@@ -23,6 +23,8 @@ pub enum Error {
     Order(#[from] OrderError),
     #[error("error with Alpaca's position API {0}")]
     Position(#[from] PositionError),
+    #[error("error with Alpaca's asset API {0}")]
+    Asset(#[from] AssetError),
     #[error("error in the conversion from/to JSON")]
     Json(#[from] serde_json::Error),
     #[error("BUG: {0}")]
@@ -282,3 +284,55 @@ pub(crate) async fn status_code_to_position_error<T>(rsp: Response) -> Result<T,
        s   => Err(Error::Unexpected(s)),
    }
 }
+
+/*******************************************************************************
+ * ASSET API SPECIFIC STUFFS
+ ******************************************************************************/
+
+/// Basically, Alpaca has reused the standard meaning of HTTP statuses but
+/// this error type adds some 'business' information on top of it
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize_repr, Deserialize_repr, thiserror::Error)]
+#[repr(u16)]
+pub enum AssetError {
+   /// Impossible to close position
+   #[error("Action forbidden")]
+   #[serde(rename="403")]
+   Forbidden = 403,
+   /// Position is not found
+   #[error("asset not found")]
+   #[serde(rename="404")]
+   NotFound = 404,
+   /// Failed to liquidate position
+   #[error("internal error")]
+   #[serde(rename="500")]
+   InternalError,
+}
+
+/// Attempts to convert an HTTP error into an asset error. 
+/// Basically, Alpaca has reused the standard meaning of HTTP statuses but
+/// this error type adds some 'business' information on top of it
+pub(crate) fn maybe_convert_to_asset_error(e: reqwest::Error) -> Error {
+    if let Some(status) = e.status() {
+        match status.as_u16() {
+            403 => Error::Asset(AssetError::Forbidden),
+            404 => Error::Asset(AssetError::NotFound),
+            500 => Error::Asset(AssetError::InternalError),
+            _   => Error::HttpError(e)
+        }
+    } else {
+        Error::HttpError(e)
+    }
+ }
+ pub(crate) async fn status_code_to_asset_error<T>(rsp: Response) -> Result<T, Error> 
+    where T: for<'de> Deserialize<'de>
+ {
+    match rsp.status().as_u16() {
+        200 => Ok(rsp.json::<T>().await?),
+        204 => Ok(rsp.json::<T>().await?),
+        207 => Ok(rsp.json::<T>().await?),
+        403 => Err(Error::Asset(AssetError::Forbidden)),
+        404 => Err(Error::Asset(AssetError::NotFound)),
+        500 => Err(Error::Asset(AssetError::InternalError)),
+        s   => Err(Error::Unexpected(s)),
+    }
+ }

@@ -20,3 +20,4 @@ pub mod rest;
 pub mod historical;
 pub mod orders;
 pub mod positions;
+pub mod assets;

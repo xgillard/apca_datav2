@@ -646,6 +646,49 @@ pub enum ClosureStatus {
   Unprocessable = 422
 }
 
+/*******************************************************************************
+ * ASSET API SPECIFIC STUFFS
+ ******************************************************************************/
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub enum AssetStatus {
+    #[serde(rename="active")]
+    Active,
+    #[serde(rename="inactive")]
+    Inactive
+}
+impl AssetStatus {
+    pub fn to_str(self) -> &'static str {
+        match self {
+            AssetStatus::Active   => "active",
+            AssetStatus::Inactive => "inactive",
+        }
+    }
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssetData {
+    /// Asset ID.
+    pub id: String,
+    /// “us_equity”
+    pub class: String,
+    /// AMEX, ARCA, BATS, NYSE, NASDAQ or NYSEARCA
+    pub exchange: String,
+    /// Symbol of the asset
+    pub symbol: String,
+    /// active or inactive
+    pub status: AssetStatus,
+    /// Asset is tradable on Alpaca or not.
+    pub tradable: bool,
+    /// Asset is marginable or not
+    pub marginable: bool,
+    /// Asset is shortable or not.
+    pub shortable: bool,
+    /// Asset is easy-to-borrow or not (filtering for easy_to_borrow = True 
+    /// is the best way to check whether the name is currently available to 
+    /// short at Alpaca).
+    pub easy_to_borrow: bool,
+    /// Asset is fractionable or not.
+    pub fractionable: bool,
+}
 
 /******************************************************************************
  * TESTS **********************************************************************
@@ -653,7 +696,7 @@ pub enum ClosureStatus {
 
 #[cfg(test)]
 mod tests {
-   use crate::entities::{OrderData, PositionData};
+   use crate::entities::{AssetData, OrderData, PositionData};
 
    #[test]
    fn test_deserialize_order() {
@@ -717,6 +760,25 @@ mod tests {
         "change_today": "0.0084"
       }"#;
       let deserialized = serde_json::from_str::<PositionData>(txt);
+      println!("{:?}", deserialized);
+      assert!(deserialized.is_ok());
+   }
+
+   #[test]
+   pub fn test_deserialize_asset() {
+      let txt = r#"{
+        "id": "904837e3-3b76-47ec-b432-046db621571b",
+        "class": "us_equity",
+        "exchange": "NASDAQ",
+        "symbol": "AAPL",
+        "status": "active",
+        "tradable": true,
+        "marginable": true,
+        "shortable": true,
+        "easy_to_borrow": true,
+        "fractionable": true      
+      }"#;
+      let deserialized = serde_json::from_str::<AssetData>(txt);
       println!("{:?}", deserialized);
       assert!(deserialized.is_ok());
    }

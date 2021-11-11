@@ -14,10 +14,13 @@
 mod utils;
 pub mod errors;
 pub mod entities;
-pub mod realtime;
 
 pub mod rest;
+
 pub mod historical;
 pub mod orders;
 pub mod positions;
 pub mod assets;
+
+pub mod realtime;
+pub mod streaming;

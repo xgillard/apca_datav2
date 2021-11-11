@@ -413,9 +413,11 @@ pub enum OrderUpdate {
     /// The time at which the order was filled.
     timestamp: DateTime<Utc>, 
     /// The average price per share at which the order was filled
+    #[serde(deserialize_with="crate::utils::number_as_f64")]
     price: f64, 
     /// The size of your total position, after this fill event, in shares.
     /// Positive for long positions, negative for short positions. 
+    #[serde(deserialize_with="crate::utils::number_as_f64")]
     position_qty: f64
   },
   /// Sent when a number of shares less than the total remaining quantity on 
@@ -427,9 +429,11 @@ pub enum OrderUpdate {
     /// The time at which the shares were filled.
     timestamp: DateTime<Utc>, 
     /// The average price per share at which the shares were filled.
+    #[serde(deserialize_with="crate::utils::number_as_f64")]
     price: f64, 
     /// The size of your total position, after this fill event, in shares. 
     /// Positive for long positions, negative for short positions.
+    #[serde(deserialize_with="crate::utils::number_as_f64")]
     position_qty: f64
   },
   /// Sent when your requested cancelation of an order is processed. 
@@ -582,6 +586,58 @@ mod tests {
   #[test]
   fn deserialize_auth_response() {
     let text = r#"{"stream":"authorization","data":{"action":"authenticate","status":"authorized"}}"#;
+    let deserialized = serde_json::from_str::<Response>(text);
+    println!("{:?}", deserialized);
+    assert!(deserialized.is_ok());
+  }
+  
+  #[test]
+  fn deserialize_order_response() {
+    let text = r#"{
+        "stream": "trade_updates",
+        "data": {
+            "event": "fill",
+            "execution_id": "b0c17642-209c-4a21-9650-915a755dc4ce",
+            "order": {
+                "asset_class": "us_equity",
+                "asset_id": "b6d1aa75-5c9c-4353-a305-9e2caa1925ab",
+                "canceled_at": null,
+                "client_order_id": "ad1a656c-c524-421b-a1ff-c84bb1b4ae38",
+                "created_at": "2021-11-11T17:11:17.353294Z",
+                "expired_at": null,
+                "extended_hours": false,
+                "failed_at": null,
+                "filled_at": "2021-11-11T17:11:17.557793Z",
+                "filled_avg_price": "333.16",
+                "filled_qty": "1",
+                "hwm": null,
+                "id": "810f77c9-fd3f-4a10-a78c-046c611f26db",
+                "legs": null,
+                "limit_price": null,
+                "notional": null,
+                "order_class": "simple",
+                "order_type": "market",
+                "qty": "1",
+                "replaced_at": null,
+                "replaced_by": null,
+                "replaces": null,
+                "side": "buy",
+                "status": "filled",
+                "stop_price": null,
+                "submitted_at": "2021-11-11T17:11:17.347956Z",
+                "symbol": "MSFT",
+                "time_in_force": "day",
+                "trail_percent": null,
+                "trail_price": null,
+                "type": "market",
+                "updated_at": "2021-11-11T17:11:17.594109Z"
+            },
+            "position_qty": "1",
+            "price": "333.16",
+            "qty": "1",
+            "timestamp": "2021-11-11T17:11:17.557793708Z"
+        }
+    }"#;
     let deserialized = serde_json::from_str::<Response>(text);
     println!("{:?}", deserialized);
     assert!(deserialized.is_ok());

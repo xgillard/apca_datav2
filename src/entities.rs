@@ -664,7 +664,7 @@ impl AssetStatus {
         }
     }
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct AssetData {
     /// Asset ID.
     pub id: String,
@@ -677,17 +677,47 @@ pub struct AssetData {
     /// active or inactive
     pub status: AssetStatus,
     /// Asset is tradable on Alpaca or not.
+    #[serde(rename="tradable", default)]
     pub tradable: bool,
     /// Asset is marginable or not
+    #[serde(rename="marginable", default)]
     pub marginable: bool,
     /// Asset is shortable or not.
+    #[serde(rename="shortable", default)]
     pub shortable: bool,
     /// Asset is easy-to-borrow or not (filtering for easy_to_borrow = True 
     /// is the best way to check whether the name is currently available to 
     /// short at Alpaca).
+    #[serde(rename="easy_to_borrow", default)]
     pub easy_to_borrow: bool,
     /// Asset is fractionable or not.
+    #[serde(rename="fractionable", default)]
     pub fractionable: bool,
+}
+
+/*******************************************************************************
+ * WATCHLIST API SPECIFIC STUFFS
+ ******************************************************************************/
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub struct WatchlistData {
+    /// watchlist id
+    #[serde(rename="id")]
+    pub id: String,
+    /// user-defined watchlist name (up to 64 characters)
+    #[serde(rename="name")]
+    pub name: String,
+    /// account ID
+    #[serde(rename="account_id")]
+    pub account_id: String,
+    /// Time when the watchlist was created
+    #[serde(rename="created_at")]
+    pub created_at: DateTime<Utc>,
+    /// Time when the watchlist was last updated
+    #[serde(rename="updated_at")]
+    pub updated_at: DateTime<Utc>,
+    /// the content of this watchlist, in the order as registered by the client
+    #[serde(rename="assets", default)]
+    pub assets: Vec<AssetData>
 }
 
 /******************************************************************************
@@ -697,6 +727,8 @@ pub struct AssetData {
 #[cfg(test)]
 mod tests {
    use crate::entities::{AssetData, OrderData, PositionData};
+
+use super::WatchlistData;
 
    #[test]
    fn test_deserialize_order() {
@@ -740,7 +772,7 @@ mod tests {
    }
 
    #[test]
-   pub fn test_deserialize_position() {
+   fn test_deserialize_position() {
       let txt = r#"{
         "asset_id": "904837e3-3b76-47ec-b432-046db621571b",
         "symbol": "AAPL ",
@@ -765,7 +797,7 @@ mod tests {
    }
 
    #[test]
-   pub fn test_deserialize_asset() {
+   fn test_deserialize_asset() {
       let txt = r#"{
         "id": "904837e3-3b76-47ec-b432-046db621571b",
         "class": "us_equity",
@@ -782,4 +814,58 @@ mod tests {
       println!("{:?}", deserialized);
       assert!(deserialized.is_ok());
    }
+
+   #[test]
+   fn deserialize_watchlist() {
+       let txt = r#"{
+                "account_id": "1d5493c9-ea39-4377-aa94-340734c368ae",
+                "assets": [
+                    {
+                        "class": "us_equity",
+                        "easy_to_borrow": true,
+                        "exchange": "ARCA",
+                        "id": "b28f4066-5c6d-479b-a2af-85dc1a8f16fb",
+                        "marginable": true,
+                        "shortable": true,
+                        "status": "active",
+                        "symbol": "SPY",
+                        "tradable": true
+                    },
+                    {
+                        "class": "us_equity",
+                        "easy_to_borrow": false,
+                        "exchange": "NASDAQ",
+                        "id": "f801f835-bfe6-4a9d-a6b1-ccbb84bfd75f",
+                        "marginable": true,
+                        "shortable": false,
+                        "status": "active",
+                        "symbol": "AMZN",
+                        "tradable": true
+                    }
+                ],
+                "created_at": "2019-10-30T07:54:42.981322Z",
+                "id": "fb306e55-16d3-4118-8c3d-c1615fcd4c03",
+                "name": "Monday List",
+                "updated_at": "2019-10-30T07:54:42.981322Z"
+            }"#;
+
+       let deserialized = serde_json::from_str::<WatchlistData>(txt);
+       println!("{:?}", deserialized);
+       assert!(deserialized.is_ok());
+   }
+
+   #[test]
+   fn deserialize_empty_watchlist() {
+       let txt = r#"[
+            {"id":"0b956f78-3c49-416f-aea9-9cfc944a9df4",
+            "account_id":"823c5bc5-46f3-4f24-8d08-e0864d536f4e",
+            "created_at":"2021-11-09T17:45:56.000167Z",
+            "updated_at":"2021-11-09T17:45:56.000167Z",
+            "name":"Primary Watchlist"
+            }]"#;
+       let rsp = serde_json::from_str::<Vec<WatchlistData>>(txt);
+       println!("{:?}", rsp);
+       assert!(rsp.is_ok())
+   }
+
 }

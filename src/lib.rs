@@ -21,6 +21,7 @@ pub mod historical;
 pub mod orders;
 pub mod positions;
 pub mod assets;
+pub mod watchlist;
 
 pub mod realtime;
 pub mod streaming;

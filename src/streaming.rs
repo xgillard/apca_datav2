@@ -36,7 +36,7 @@
 //! an authentication message over the WebSocket connection with the API key, 
 //! and secret key as its payload:
 //! 
-//! ``` 
+//! ```json
 //! {
 //!     "action": "authenticate",
 //!     "data": {
@@ -49,7 +49,7 @@
 //! The server will then authorize the connection and respond with either a 
 //! successful response:
 //! 
-//! ```
+//! ```json
 //! {
 //!     "stream": "authorization",
 //!     "data": {
@@ -61,7 +61,7 @@
 //! 
 //! or an unathorized response:
 //! 
-//! ```
+//! ```json
 //! {
 //!     "stream": "authorization",
 //!     "data": {
@@ -74,7 +74,7 @@
 //! In the case the socket connection is not authorized yet, a new message 
 //! under the authorization stream is issued in response to the listen request.
 //! 
-//! ```
+//! ```json
 //! {
 //!     "stream": "authorization",
 //!     "data": {
@@ -89,7 +89,7 @@
 //! In order to listen to streams, the client sends a listen message to the 
 //! server as follows.
 //!  
-//! ```
+//! ```json
 //! {
 //!     "action": "listen",
 //!     "data": {
@@ -99,7 +99,7 @@
 //! ```
 //! 
 //! The server acknowledges by replying a message in the listening stream.
-//! ```
+//! ```json
 //! {
 //!     "stream": "listening",
 //!     "data": {
@@ -133,7 +133,7 @@
 //! fills, partial fills, as well as cancellations and rejections of orders. 
 //! Clients may listen to this stream by sending a listen message:
 //! 
-//! ```
+//! ```json
 //! {
 //!     "action": "listen",
 //!     "data": {
@@ -146,7 +146,7 @@
 //! message on the listening stream. The message’s data payload will include 
 //! the list of streams the client is currently listening to:
 //! 
-//! ```
+//! ```json
 //! {
 //!     "stream": "listening",
 //!     "data": {
@@ -216,7 +216,7 @@
 //! 
 //! An example message sent over the trade_updates stream would look like:
 //!  
-//! ```
+//! ```json
 //! {
 //!     "stream": "trade_updates",
 //!     "data": {

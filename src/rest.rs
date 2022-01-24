@@ -44,6 +44,11 @@ impl Client {
         .header(APCA_API_KEY_ID,     &self.key)
         .header(APCA_API_SECRET_KEY, &self.secret)        
   }
+  pub fn put_authenticated(&self, url: &str) -> RequestBuilder {
+    self.client.put(url)
+        .header(APCA_API_KEY_ID,     &self.key)
+        .header(APCA_API_SECRET_KEY, &self.secret)        
+  }
   pub fn post_authenticated(&self, url: &str) -> RequestBuilder {
     self.client.post(url)
         .header(APCA_API_KEY_ID,     &self.key)

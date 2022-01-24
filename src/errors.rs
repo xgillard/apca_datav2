@@ -25,6 +25,8 @@ pub enum Error {
     Position(#[from] PositionError),
     #[error("error with Alpaca's asset API {0}")]
     Asset(#[from] AssetError),
+    #[error("error with Alpaca's watchlist API {0}")]
+    Watchlist(#[from] WatchlistError),
     #[error("error in the conversion from/to JSON")]
     Json(#[from] serde_json::Error),
     #[error("BUG: {0}")]
@@ -333,6 +335,63 @@ pub(crate) fn maybe_convert_to_asset_error(e: reqwest::Error) -> Error {
         403 => Err(Error::Asset(AssetError::Forbidden)),
         404 => Err(Error::Asset(AssetError::NotFound)),
         500 => Err(Error::Asset(AssetError::InternalError)),
+        s   => Err(Error::Unexpected(s)),
+    }
+ }
+
+/*******************************************************************************
+ * WATCHLIST API SPECIFIC STUFFS
+ ******************************************************************************/
+
+/// Basically, Alpaca has reused the standard meaning of HTTP statuses but
+/// this error type adds some 'business' information on top of it
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize_repr, Deserialize_repr, thiserror::Error)]
+#[repr(u16)]
+pub enum WatchlistError {
+   /// the requested watchlist is not found, or one of the symbol is not found in the assets
+   #[error("the requested watchlist is not found, or one of the symbol is not found in the assets")]
+   #[serde(rename="404")]
+   NotFound = 404,
+   /// watchlist name is not unique, or some parameters are not valid
+   #[error("watchlist name is not unique, or some parameters are not valid")]
+   #[serde(rename="422")]
+   Unprocessable = 422,
+}
+
+/// Attempts to convert an HTTP error into a watchlist error. 
+/// Basically, Alpaca has reused the standard meaning of HTTP statuses but
+/// this error type adds some 'business' information on top of it
+pub(crate) fn maybe_convert_to_watchlist_error(e: reqwest::Error) -> Error {
+    if let Some(status) = e.status() {
+        match status.as_u16() {
+            404 => Error::Watchlist(WatchlistError::NotFound),
+            422 => Error::Watchlist(WatchlistError::Unprocessable),
+            _   => Error::HttpError(e)
+        }
+    } else {
+        Error::HttpError(e)
+    }
+ }
+ pub(crate) async fn status_code_to_watchlist_error<T>(rsp: Response) -> Result<T, Error> 
+    where T: for<'de> Deserialize<'de>
+ {
+    match rsp.status().as_u16() {
+        200 => Ok(rsp.json::<T>().await?),
+        204 => Ok(rsp.json::<T>().await?),
+        207 => Ok(rsp.json::<T>().await?),
+        404 => Err(Error::Watchlist(WatchlistError::NotFound)),
+        422 => Err(Error::Watchlist(WatchlistError::Unprocessable)),
+        s   => Err(Error::Unexpected(s)),
+    }
+ }
+ pub(crate) async fn status_code_to_watchlist_error_noparse(rsp: Response) -> Result<(), Error> 
+ {
+    match rsp.status().as_u16() {
+        200 => Ok(()),
+        204 => Ok(()),
+        207 => Ok(()),
+        404 => Err(Error::Watchlist(WatchlistError::NotFound)),
+        422 => Err(Error::Watchlist(WatchlistError::Unprocessable)),
         s   => Err(Error::Unexpected(s)),
     }
  }
